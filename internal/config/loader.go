@@ -1,9 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	
 	"github.com/spf13/viper"
 	"path/filepath"
@@ -117,5 +119,145 @@ func (l *Loader) SaveConfig(cfg *types.ProxyConfig) error {
 	}
 	
 	l.logger.Info("Saved configuration", "file", l.configPath)
+	return nil
+}
+
+// LoadBootstrapData loads services and routes from configuration file for bootstrapping
+func (l *Loader) LoadBootstrapData(storage types.Storage) error {
+	ctx := context.Background()
+	
+	// Check if we have services defined in config
+	servicesRaw := viper.Get("services")
+	if servicesRaw != nil {
+		services, ok := servicesRaw.([]interface{})
+		if ok {
+			for _, svcRaw := range services {
+				svcMap, ok := svcRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				
+				service := &types.Service{}
+				
+				// Parse service fields
+				if id, ok := svcMap["id"].(string); ok {
+					service.ID = id
+				}
+				if name, ok := svcMap["name"].(string); ok {
+					service.Name = name
+				}
+				
+				// Parse endpoints
+				if endpointsRaw, ok := svcMap["endpoints"].([]interface{}); ok {
+					for _, ep := range endpointsRaw {
+						if endpoint, ok := ep.(string); ok {
+							service.Endpoints = append(service.Endpoints, endpoint)
+						}
+					}
+				}
+				
+				if healthPath, ok := svcMap["health_path"].(string); ok {
+					service.HealthPath = healthPath
+				}
+				if weight, ok := svcMap["weight"].(int); ok {
+					service.Weight = weight
+				}
+				if maxConns, ok := svcMap["max_conns"].(int); ok {
+					service.MaxConns = maxConns
+				}
+				if stripPrefix, ok := svcMap["strip_prefix"].(bool); ok {
+					service.StripPrefix = stripPrefix
+				}
+				if active, ok := svcMap["active"].(bool); ok {
+					service.Active = active
+				}
+				
+				// Parse timeout
+				if timeoutStr, ok := svcMap["timeout"].(string); ok {
+					if duration, err := time.ParseDuration(timeoutStr); err == nil {
+						service.Timeout = duration
+					}
+				}
+				
+				// Parse metadata
+				if metadataRaw, ok := svcMap["metadata"].(map[string]interface{}); ok {
+					service.Metadata = make(map[string]string)
+					for k, v := range metadataRaw {
+						if strVal, ok := v.(string); ok {
+							service.Metadata[k] = strVal
+						}
+					}
+				}
+				
+				// Check if service exists
+				if _, err := storage.GetService(ctx, service.ID); err != nil {
+					// Service doesn't exist, create it
+					if err := storage.CreateService(ctx, service); err != nil {
+						l.logger.Error("failed to create bootstrap service", "id", service.ID, "error", err)
+					} else {
+						l.logger.Info("created bootstrap service", "id", service.ID, "name", service.Name)
+					}
+				}
+			}
+		}
+	}
+	
+	// Check if we have routes defined in config
+	routesRaw := viper.Get("routes")
+	if routesRaw != nil {
+		routes, ok := routesRaw.([]interface{})
+		if ok {
+			for _, routeRaw := range routes {
+				routeMap, ok := routeRaw.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				
+				route := &types.Route{}
+				
+				// Parse route fields
+				if id, ok := routeMap["id"].(string); ok {
+					route.ID = id
+				}
+				if priority, ok := routeMap["priority"].(int); ok {
+					route.Priority = priority
+				}
+				if host, ok := routeMap["host"].(string); ok {
+					route.Host = host
+				}
+				if pathPrefix, ok := routeMap["path_prefix"].(string); ok {
+					route.PathPrefix = pathPrefix
+				}
+				if serviceID, ok := routeMap["service_id"].(string); ok {
+					route.ServiceID = serviceID
+				}
+				
+				// Parse middlewares
+				if middlewaresRaw, ok := routeMap["middlewares"].([]interface{}); ok {
+					for _, mw := range middlewaresRaw {
+						if middleware, ok := mw.(string); ok {
+							route.Middlewares = append(route.Middlewares, middleware)
+						}
+					}
+				}
+				
+				// Parse metadata
+				if metadataRaw, ok := routeMap["metadata"].(map[string]interface{}); ok {
+					route.Metadata = metadataRaw
+				}
+				
+				// Check if route exists
+				if _, err := storage.GetRoute(ctx, route.ID); err != nil {
+					// Route doesn't exist, create it
+					if err := storage.CreateRoute(ctx, route); err != nil {
+						l.logger.Error("failed to create bootstrap route", "id", route.ID, "error", err)
+					} else {
+						l.logger.Info("created bootstrap route", "id", route.ID, "service", route.ServiceID)
+					}
+				}
+			}
+		}
+	}
+	
 	return nil
 }

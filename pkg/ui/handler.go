@@ -3,6 +3,7 @@ package ui
 
 import (
 	"embed"
+	"io"
 	"io/fs"
 	"net/http"
 	"path"
@@ -21,14 +22,11 @@ func Handler() http.Handler {
 		staticFS = staticFiles
 	}
 	
-	fileServer := http.FileServer(http.FS(staticFS))
-	
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Clean the path
 		upath := r.URL.Path
 		if !strings.HasPrefix(upath, "/") {
 			upath = "/" + upath
-			r.URL.Path = upath
 		}
 		
 		// Remove /ui prefix if present
@@ -37,18 +35,45 @@ func Handler() http.Handler {
 			if upath == "" {
 				upath = "/"
 			}
-			r.URL.Path = upath
 		}
 		
-		// Try to serve the file
-		// If it's a directory or doesn't exist, serve index.html
-		if upath == "/" || !hasExtension(upath) {
-			upath = "/index.html"
-			r.URL.Path = upath
+		// Serve index.html for root or non-asset paths
+		filename := upath
+		if upath == "/" {
+			filename = "index.html"
+		} else if !hasExtension(upath) {
+			filename = "index.html"
+		} else {
+			// Remove leading slash for embed FS
+			filename = strings.TrimPrefix(upath, "/")
 		}
 		
-		// Set cache headers for static assets
-		if hasExtension(upath) && upath != "/index.html" {
+		// Try to open the file
+		file, err := staticFS.Open(filename)
+		if err != nil {
+			// If file not found and it's not an asset, serve index.html
+			if !hasExtension(upath) {
+				file, err = staticFS.Open("index.html")
+				if err != nil {
+					http.NotFound(w, r)
+					return
+				}
+			} else {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		defer file.Close()
+		
+		// Get file info
+		stat, err := file.Stat()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		// Set cache headers
+		if hasExtension(upath) && upath != "/" {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -60,8 +85,8 @@ func Handler() http.Handler {
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		
-		// Serve the file
-		fileServer.ServeHTTP(w, r)
+		// Serve the file content
+		http.ServeContent(w, r, filename, stat.ModTime(), file.(io.ReadSeeker))
 	})
 }
 

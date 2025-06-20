@@ -161,6 +161,7 @@ api:
   enabled: true
   addr: ":8081"
   auth: true  # Requires authentication
+  api_key: "dev-api-key-12345"  # API key for authentication
 
 # Web UI configuration
 ui:

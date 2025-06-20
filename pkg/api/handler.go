@@ -53,43 +53,67 @@ func (h *Handler) SetReloadCallback(callback func(*types.ProxyConfig) error) {
 
 // Router returns the HTTP handler for the API
 func (h *Handler) Router() http.Handler {
-	router := mux.NewRouter()
+	mainRouter := mux.NewRouter()
 	
-	// Health check
-	router.HandleFunc("/health", h.handleHealth).Methods("GET")
+	// Public endpoints (no auth required)
+	publicRouter := mainRouter.PathPrefix("/").Subrouter()
+	publicRouter.HandleFunc("/health", h.handleHealth).Methods("GET")
+	
+	// Apply only CORS and logging middleware to public routes
+	publicRouter.Use(func(next http.Handler) http.Handler {
+		return corsMiddleware(jsonMiddleware(loggingMiddleware(next, h.logger)))
+	})
+	
+	// Protected API endpoints
+	apiRouter := mainRouter.PathPrefix("/api/v1").Subrouter()
 	
 	// Services
-	router.HandleFunc("/api/v1/services", h.handleListServices).Methods("GET")
-	router.HandleFunc("/api/v1/services", h.handleCreateService).Methods("POST")
-	router.HandleFunc("/api/v1/services/{id}", h.handleGetService).Methods("GET")
-	router.HandleFunc("/api/v1/services/{id}", h.handleUpdateService).Methods("PUT")
-	router.HandleFunc("/api/v1/services/{id}", h.handleDeleteService).Methods("DELETE")
+	apiRouter.HandleFunc("/services", h.handleListServices).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/services", h.handleCreateService).Methods("POST", "OPTIONS")
+	apiRouter.HandleFunc("/services/{id}", h.handleGetService).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/services/{id}", h.handleUpdateService).Methods("PUT", "OPTIONS")
+	apiRouter.HandleFunc("/services/{id}", h.handleDeleteService).Methods("DELETE", "OPTIONS")
 	
 	// Routes
-	router.HandleFunc("/api/v1/routes", h.handleListRoutes).Methods("GET")
-	router.HandleFunc("/api/v1/routes", h.handleCreateRoute).Methods("POST")
-	router.HandleFunc("/api/v1/routes/{id}", h.handleGetRoute).Methods("GET")
-	router.HandleFunc("/api/v1/routes/{id}", h.handleUpdateRoute).Methods("PUT")
-	router.HandleFunc("/api/v1/routes/{id}", h.handleDeleteRoute).Methods("DELETE")
+	apiRouter.HandleFunc("/routes", h.handleListRoutes).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/routes", h.handleCreateRoute).Methods("POST", "OPTIONS")
+	apiRouter.HandleFunc("/routes/{id}", h.handleGetRoute).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/routes/{id}", h.handleUpdateRoute).Methods("PUT", "OPTIONS")
+	apiRouter.HandleFunc("/routes/{id}", h.handleDeleteRoute).Methods("DELETE", "OPTIONS")
 	
 	// Metrics
-	router.HandleFunc("/api/v1/metrics", h.handleMetrics).Methods("GET")
+	apiRouter.HandleFunc("/metrics", h.handleMetrics).Methods("GET", "OPTIONS")
 	
 	// Admin
-	router.HandleFunc("/api/v1/admin/reload", h.handleReload).Methods("POST")
-	router.HandleFunc("/api/v1/admin/config", h.handleGetConfig).Methods("GET")
-	router.HandleFunc("/api/v1/admin/config", h.handleUpdateConfig).Methods("PUT")
+	apiRouter.HandleFunc("/admin/reload", h.handleReload).Methods("POST", "OPTIONS")
+	apiRouter.HandleFunc("/admin/config", h.handleGetConfig).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/admin/config", h.handleUpdateConfig).Methods("PUT", "OPTIONS")
 	
-	// Apply middleware
-	// Create auth config from proxy config
-	authConfig := &AuthConfig{
-		Enabled: h.config.API.Auth,
-		Type:    "api-key",
-		Token:   h.config.API.APIKey,
-		HeaderName: "X-API-Key",
+	// Apply common middleware to API routes first
+	apiRouter.Use(func(next http.Handler) http.Handler {
+		return loggingMiddleware(next, h.logger)
+	})
+	apiRouter.Use(func(next http.Handler) http.Handler {
+		return corsMiddleware(next)
+	})
+	apiRouter.Use(func(next http.Handler) http.Handler {
+		return jsonMiddleware(next)
+	})
+	
+	// Apply auth middleware to API routes last
+	if h.config.API.Auth {
+		authConfig := &AuthConfig{
+			Enabled: true,
+			Type:    "api-key",
+			Token:   h.config.API.APIKey,
+			HeaderName: "X-API-Key",
+		}
+		apiRouter.Use(func(next http.Handler) http.Handler {
+			return authMiddleware(next, authConfig)
+		})
 	}
 	
-	return WithMiddleware(router, h.logger, authConfig)
+	return mainRouter
 }
 
 // Health endpoint handlers

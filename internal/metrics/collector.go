@@ -12,7 +12,21 @@ import (
 )
 
 // GlobalCollector is the global metrics collector instance
-var GlobalCollector = NewCollector()
+var GlobalCollector *Collector
+var once sync.Once
+
+// InitGlobalCollector initializes the global collector (safe to call multiple times)
+func InitGlobalCollector() *Collector {
+	once.Do(func() {
+		GlobalCollector = NewCollector()
+	})
+	return GlobalCollector
+}
+
+// init ensures the global collector is initialized when the package is imported
+func init() {
+	InitGlobalCollector()
+}
 
 // Collector tracks various system and application metrics
 type Collector struct {
@@ -80,10 +94,10 @@ func NewCollector() *Collector {
 	c.cpuPercent.Store(0.0)
 	c.memoryUsage.Store(0.0)
 	
-	// Register Prometheus metrics
-	prometheus.MustRegister(c.requestsTotal)
-	prometheus.MustRegister(c.requestDuration)
-	prometheus.MustRegister(c.errorRate)
+	// Register Prometheus metrics - ignore errors if already registered
+	_ = prometheus.Register(c.requestsTotal)
+	_ = prometheus.Register(c.requestDuration)
+	_ = prometheus.Register(c.errorRate)
 	
 	// Start system metrics updater
 	c.startSystemMetricsUpdater()

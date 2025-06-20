@@ -3,8 +3,9 @@ package middleware
 import (
 	"bytes"
 	"io"
+	"maps"
 	"time"
-	
+
 	"net/http"
 
 	"discobox/internal/types"
@@ -35,11 +36,11 @@ func defaultRetryIf(resp *http.Response, err error) bool {
 	if err != nil {
 		return types.IsRetryable(err)
 	}
-	
+
 	if resp == nil {
 		return true
 	}
-	
+
 	// Retry on 5xx errors and specific 4xx errors
 	switch resp.StatusCode {
 	case http.StatusBadGateway,
@@ -57,7 +58,7 @@ func Retry(config RetryConfig) types.Middleware {
 	if config.RetryIf == nil {
 		config.RetryIf = defaultRetryIf
 	}
-	
+
 	return func(next http.Handler) http.Handler {
 		return &retryHandler{
 			next:   next,
@@ -84,49 +85,47 @@ func (rh *retryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		r.Body.Close()
 	}
-	
+
 	delay := rh.config.InitialDelay
-	
+
 	for attempt := 0; attempt < rh.config.MaxAttempts; attempt++ {
 		// Create new request body for each attempt
 		if bodyBytes != nil {
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		}
-		
+
 		// Capture response
 		recorder := &responseRecorder{
 			header: make(http.Header),
 			body:   &bytes.Buffer{},
 		}
-		
+
 		// Process request
 		rh.next.ServeHTTP(recorder, r)
-		
+
 		// Check if we should retry
 		shouldRetry := rh.config.RetryIf(&http.Response{
 			StatusCode: recorder.statusCode,
 			Header:     recorder.header,
 		}, nil)
-		
+
 		if !shouldRetry || attempt == rh.config.MaxAttempts-1 {
 			// Write final response
-			for k, v := range recorder.header {
-				w.Header()[k] = v
-			}
+			maps.Copy(w.Header(), recorder.header)
 			w.WriteHeader(recorder.statusCode)
 			w.Write(recorder.body.Bytes())
 			return
 		}
-		
+
 		// Wait before retrying
 		time.Sleep(delay)
-		
+
 		// Calculate next delay with exponential backoff
 		delay = time.Duration(float64(delay) * rh.config.Multiplier)
 		if delay > rh.config.MaxDelay {
 			delay = rh.config.MaxDelay
 		}
-		
+
 		// Add retry headers
 		r.Header.Set("X-Retry-Attempt", string(rune(attempt+1)))
 	}

@@ -11,13 +11,18 @@ import (
 	"discobox/internal/storage"
 	"discobox/internal/types"
 	"discobox/pkg/api"
+	"discobox/pkg/ui"
 	"flag"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
@@ -66,7 +71,7 @@ func main() {
 	}
 
 	// Initialize components
-	app, err := initializeApp(cfg, logger)
+	app, err := initializeApp(cfg, logger, loader)
 	if err != nil {
 		logger.Error("Failed to initialize application", "error", err)
 		os.Exit(1)
@@ -148,11 +153,17 @@ type application struct {
 	logger      types.Logger
 }
 
-func initializeApp(cfg *types.ProxyConfig, logger types.Logger) (*application, error) {
+func initializeApp(cfg *types.ProxyConfig, logger types.Logger, loader *config.Loader) (*application, error) {
 	// Initialize storage
 	store, err := initStorage(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize storage: %w", err)
+	}
+	
+	// Load bootstrap data from configuration
+	if err := loader.LoadBootstrapData(store); err != nil {
+		logger.Error("Failed to load bootstrap data", "error", err)
+		// Don't fail startup - bootstrap data is optional
 	}
 
 	// Initialize load balancer
@@ -202,7 +213,17 @@ func initializeApp(cfg *types.ProxyConfig, logger types.Logger) (*application, e
 	})
 
 	// Build middleware chain
-	handler := buildMiddlewareChain(cfg, reverseProxy, logger)
+	proxyHandler := buildMiddlewareChain(cfg, reverseProxy, logger)
+	
+	// Create combined handler with UI fallback if enabled
+	var handler http.Handler = proxyHandler
+	if cfg.UI.Enabled {
+		handler = &uiProxyHandler{
+			proxy:   proxyHandler,
+			ui:      ui.Handler(),
+			uiPath:  cfg.UI.Path,
+		}
+	}
 
 	// Initialize proxy server
 	proxyServer := &http.Server{
@@ -365,3 +386,107 @@ func (z *zapLoggerWrapper) fieldsToZap(fields []interface{}) []zap.Field {
 	}
 	return zapFields
 }
+
+// uiProxyHandler serves UI when no proxy route matches
+type uiProxyHandler struct {
+	proxy  http.Handler
+	ui     http.Handler
+	uiPath string
+}
+
+func (h *uiProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Check if this is an API request that should be proxied to the API server
+	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" {
+		// Proxy to API server
+		apiURL, _ := url.Parse("http://localhost:8081")
+		proxy := httputil.NewSingleHostReverseProxy(apiURL)
+		proxy.ServeHTTP(w, r)
+		return
+	}
+	
+	// Create a custom response writer to intercept 404s
+	rw := &interceptResponseWriter{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK,
+		headers:        make(http.Header),
+		body:           make([]byte, 0, 512),
+	}
+	
+	// Try the proxy first
+	h.proxy.ServeHTTP(rw, r)
+	
+	// If proxy returned 404, serve UI instead
+	if rw.statusCode == http.StatusNotFound {
+		// Clear any headers set by proxy
+		for k := range w.Header() {
+			delete(w.Header(), k)
+		}
+		// Serve the UI
+		h.ui.ServeHTTP(w, r)
+		return
+	}
+	
+	// Otherwise, write the intercepted response
+	rw.flush()
+}
+
+type interceptResponseWriter struct {
+	http.ResponseWriter
+	statusCode    int
+	headers       http.Header
+	body          []byte
+	headerWritten bool
+	intercepting  bool
+}
+
+func (rw *interceptResponseWriter) Header() http.Header {
+	if rw.intercepting {
+		return rw.headers
+	}
+	return rw.ResponseWriter.Header()
+}
+
+func (rw *interceptResponseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	if code == http.StatusNotFound {
+		// Start intercepting if we get a 404
+		rw.intercepting = true
+		// Copy current headers
+		for k, v := range rw.ResponseWriter.Header() {
+			rw.headers[k] = v
+		}
+		return
+	}
+	if !rw.headerWritten {
+		rw.ResponseWriter.WriteHeader(code)
+		rw.headerWritten = true
+	}
+}
+
+func (rw *interceptResponseWriter) Write(b []byte) (int, error) {
+	if !rw.headerWritten && rw.statusCode != http.StatusNotFound {
+		rw.WriteHeader(rw.statusCode)
+	}
+	
+	if rw.intercepting {
+		// Buffer the 404 response body
+		rw.body = append(rw.body, b...)
+		return len(b), nil
+	}
+	
+	return rw.ResponseWriter.Write(b)
+}
+
+func (rw *interceptResponseWriter) flush() {
+	if !rw.headerWritten {
+		// Copy headers
+		for k, v := range rw.headers {
+			rw.ResponseWriter.Header()[k] = v
+		}
+		rw.ResponseWriter.WriteHeader(rw.statusCode)
+	}
+	if len(rw.body) > 0 {
+		rw.ResponseWriter.Write(rw.body)
+	}
+}
+

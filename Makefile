@@ -65,7 +65,7 @@ run: build
 	$(BUILD_DIR)/$(BINARY_NAME) -config configs/discobox.yaml
 
 # Development mode with hot reload
-dev:
+dev: clean
 	@echo "Running in development mode with hot reload..."
 	$(GORUN) $(MAIN_PATH)
 #	@which air > /dev/null || go install github.com/air-verse/air@latest
