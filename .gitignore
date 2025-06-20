@@ -3,7 +3,7 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 build/
-
+*.db
 *.exe
 # User-specific files
 *.rsuser
@@ -147,7 +147,7 @@ _TeamCity*
 # AxoCover is a Code Coverage Tool
 .axoCover/*
 !.axoCover/settings.json
-
+CLAUDE.md
 # Coverlet is a free, cross platform Code Coverage Tool
 coverage*.json
 coverage*.xml
