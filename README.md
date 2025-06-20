@@ -38,7 +38,7 @@ A production-grade reverse proxy and service manager built in Go, featuring ngin
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/discobox.git
+git clone https://github.com/nickheyer/discobox.git
 cd discobox
 
 # Build and run with Docker Compose
@@ -303,5 +303,5 @@ Built with best-in-class Go libraries:
 ## Support
 
 - Documentation: [docs/](docs/)
-- Issues: [GitHub Issues](https://github.com/yourusername/discobox/issues)
-- Discussions: [GitHub Discussions](https://github.com/yourusername/discobox/discussions)
+- Issues: [GitHub Issues](https://github.com/nickheyer/discobox/issues)
+- Discussions: [GitHub Discussions](https://github.com/nickheyer/discobox/discussions)
