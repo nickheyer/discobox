@@ -57,6 +57,7 @@ discobox/
 │       ├── service.go                # Service definition
 │       ├── route.go                  # Route definition
 │       └── errors.go                 # Custom errors
+        ... OTHER COMMON TYPES ...
 ├── pkg/                              # Public packages
 │   ├── api/                          # REST API
 │   │   ├── handler.go                # API handlers
