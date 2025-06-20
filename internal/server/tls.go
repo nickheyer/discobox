@@ -10,29 +10,28 @@ import (
 
 // TLSManager manages TLS certificates and configuration
 type TLSManager struct {
-	config *types.ProxyConfig
-	logger types.Logger
+	config      *types.ProxyConfig
+	logger      types.Logger
+	certManager *CertManager
 }
 
 // NewTLSManager creates a new TLS manager
-func NewTLSManager(config *types.ProxyConfig, logger types.Logger) *TLSManager {
-	return &TLSManager{
-		config: config,
-		logger: logger,
+func NewTLSManager(config *types.ProxyConfig, logger types.Logger) (*TLSManager, error) {
+	certManager, err := NewCertManager(config, logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate manager: %w", err)
 	}
+	
+	return &TLSManager{
+		config:      config,
+		logger:      logger,
+		certManager: certManager,
+	}, nil
 }
 
 // GetCertificate returns a certificate for the given ClientHelloInfo
 func (tm *TLSManager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	tm.logger.Debug("TLS certificate requested", "server_name", hello.ServerName)
-	
-	// In a real implementation, this would:
-	// 1. Check if we have a certificate for the requested server name
-	// 2. If using ACME, potentially request a new certificate
-	// 3. Return the appropriate certificate
-	
-	// For now, return nil to use the default certificate
-	return nil, nil
+	return tm.certManager.GetCertificate(hello)
 }
 
 // CreateTLSConfig creates a TLS configuration

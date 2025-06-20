@@ -20,6 +20,7 @@ type ProxyConfig struct {
 		Domains    []string `yaml:"domains,omitempty"`
 		Email      string   `yaml:"email,omitempty"`
 		MinVersion string   `yaml:"min_version"`
+		CacheDir   string   `yaml:"cache_dir,omitempty"`
 	} `yaml:"tls"`
 	
 	// HTTP/2 and HTTP/3

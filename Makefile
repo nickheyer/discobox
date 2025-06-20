@@ -21,6 +21,7 @@ GOBUILD=$(GOCMD) build
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
+GORUN=$(GOCMD) run
 GOFMT=gofmt
 GOLINT=golangci-lint
 GOVET=$(GOCMD) vet
@@ -66,8 +67,9 @@ run: build
 # Development mode with hot reload
 dev:
 	@echo "Running in development mode with hot reload..."
-	@which air > /dev/null || go install github.com/cosmtrek/air@latest
-	air -c .air.toml
+	$(GORUN) $(MAIN_PATH)
+#	@which air > /dev/null || go install github.com/air-verse/air@latest
+# 	air -c .air.toml
 
 # Run tests
 test:
@@ -206,7 +208,7 @@ setup:
 	@echo "Setting up development environment..."
 	# Install tools
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	go install github.com/cosmtrek/air@latest
+	go install github.com/air-verse/air@latest
 	go install github.com/swaggo/swag/cmd/swag@latest
 	# Install dependencies
 	$(MAKE) deps

@@ -18,6 +18,10 @@ type RequestMetrics struct {
 	PerSecond    float64 `json:"per_second"`
 	Errors       int64   `json:"errors"`
 	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	P50LatencyMs float64 `json:"p50_latency_ms"`
+	P95LatencyMs float64 `json:"p95_latency_ms"`
+	P99LatencyMs float64 `json:"p99_latency_ms"`
+	ErrorRate    float64 `json:"error_rate"`
 }
 
 // SystemMetrics represents system statistics

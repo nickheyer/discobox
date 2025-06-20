@@ -13,14 +13,23 @@ import (
 	"github.com/gorilla/mux"
 	"net/http"
 	
+	"discobox/internal/metrics"
 	"discobox/internal/types"
+	"discobox/internal/version"
 )
 
 // Handler provides the REST API implementation
 type Handler struct {
-	storage types.Storage
-	logger  types.Logger
-	config  *types.ProxyConfig
+	storage      types.Storage
+	logger       types.Logger
+	config       *types.ProxyConfig
+	configLoader ConfigLoader
+	onReload     func(*types.ProxyConfig) error
+}
+
+// ConfigLoader defines the interface for loading configuration
+type ConfigLoader interface {
+	LoadConfig() (*types.ProxyConfig, error)
 }
 
 // New creates a new API handler instance
@@ -30,6 +39,16 @@ func New(storage types.Storage, logger types.Logger, config *types.ProxyConfig) 
 		logger:  logger,
 		config:  config,
 	}
+}
+
+// SetConfigLoader sets the configuration loader
+func (h *Handler) SetConfigLoader(loader ConfigLoader) {
+	h.configLoader = loader
+}
+
+// SetReloadCallback sets the reload callback function
+func (h *Handler) SetReloadCallback(callback func(*types.ProxyConfig) error) {
+	h.onReload = callback
 }
 
 // Router returns the HTTP handler for the API
@@ -77,14 +96,26 @@ func (h *Handler) Router() http.Handler {
 
 // handleHealth handles GET /health
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	versionInfo := version.GetInfo()
+	memStats := metrics.GlobalCollector.GetMemoryStats()
+	
 	health := map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"version":   "1.0.0", // TODO: Get from build info
+		"version":   versionInfo.Version,
+		"build": map[string]interface{}{
+			"git_commit": versionInfo.GitCommit,
+			"build_time": versionInfo.BuildTime,
+			"go_version": versionInfo.GoVersion,
+			"platform":   versionInfo.Platform,
+		},
 		"runtime": map[string]interface{}{
-			"goroutines": runtime.NumGoroutine(),
-			"gomaxprocs": runtime.GOMAXPROCS(0),
-			"version":    runtime.Version(),
+			"goroutines":    runtime.NumGoroutine(),
+			"gomaxprocs":    runtime.GOMAXPROCS(0),
+			"version":       runtime.Version(),
+			"uptime":        versionInfo.Uptime,
+			"memory_mb":     memStats.Alloc / 1024 / 1024,
+			"gc_count":      memStats.NumGC,
 		},
 	}
 	
@@ -412,58 +443,116 @@ func (h *Handler) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 
 // handleMetrics handles GET /api/v1/metrics
 func (h *Handler) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	// Get memory stats
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
+	// Get real metrics from the global collector
+	stats := metrics.GlobalCollector.GetStats()
 	
-	// Calculate uptime
-	uptime := time.Since(startTime)
-	
-	// Build metrics response
-	// In a real implementation, these would come from actual metric collectors
-	metrics := MetricsData{
-		Uptime: uptime.String(),
+	// Build metrics response with real data
+	metricsData := MetricsData{
+		Uptime: formatDuration(stats.Uptime),
 		Requests: RequestMetrics{
-			Total:        10000,  // TODO: Get from metrics collector
-			PerSecond:    50.5,   // TODO: Calculate from actual data
-			Errors:       25,     // TODO: Get from metrics collector
-			AvgLatencyMs: 125.3,  // TODO: Calculate from actual data
+			Total:        int64(stats.TotalRequests),
+			PerSecond:    stats.RequestsPerSec,
+			Errors:       int64(stats.TotalErrors),
+			AvgLatencyMs: stats.AvgLatencyMs,
+			P50LatencyMs: stats.P50LatencyMs,
+			P95LatencyMs: stats.P95LatencyMs,
+			P99LatencyMs: stats.P99LatencyMs,
+			ErrorRate:    stats.ErrorRate,
 		},
 		System: SystemMetrics{
 			Goroutines:  runtime.NumGoroutine(),
-			MemoryMB:    float64(memStats.Alloc) / 1024 / 1024,
-			CPUPercent:  0.0,  // TODO: Implement CPU tracking
-			Connections: 100,  // TODO: Get from connection tracker
+			MemoryMB:    stats.MemoryUsageMB,
+			CPUPercent:  stats.CPUPercent,
+			Connections: int(stats.ActiveConnections),
 		},
 		Services: make(map[string]ServiceMetrics),
 	}
 	
-	// Add per-service metrics
-	// In a real implementation, this would aggregate from actual service metrics
-	metrics.Services["example-service"] = ServiceMetrics{
-		Requests:     5000,
-		Errors:       10,
-		AvgLatencyMs: 100.5,
-		HealthStatus: "healthy",
+	// Get all services and their health status
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	
+	services, err := h.storage.ListServices(ctx)
+	if err == nil {
+		for _, service := range services {
+			// Get health status for each service
+			// Check if service is healthy based on whether it's active
+			health := "unknown"
+			if service.Active {
+				// Consider service healthy if it was updated recently
+				// This assumes health checks are updating the service status
+				if time.Since(service.UpdatedAt) < 1*time.Minute {
+					health = "healthy"
+				} else {
+					health = "degraded"
+				}
+			} else {
+				health = "unhealthy"
+			}
+			
+			metricsData.Services[service.ID] = ServiceMetrics{
+				Requests:     int64(stats.TotalRequests / uint64(len(services))), // Distribute evenly for now
+				Errors:       int64(stats.TotalErrors / uint64(len(services))),
+				AvgLatencyMs: stats.AvgLatencyMs,
+				HealthStatus: health,
+			}
+		}
 	}
 	
-	respondJSON(w, http.StatusOK, metrics)
+	respondJSON(w, http.StatusOK, metricsData)
 }
 
 // Admin endpoint handlers
 
 // handleReload handles POST /api/v1/admin/reload
 func (h *Handler) handleReload(w http.ResponseWriter, r *http.Request) {
-	// In a real implementation, this would trigger a configuration reload
-	// For now, we'll simulate the operation
-	
 	h.logger.Info("Configuration reload requested")
 	
-	// Simulate reload process
+	// Check if config loader is available
+	if h.configLoader == nil {
+		respondError(w, http.StatusServiceUnavailable, "Configuration loader not available")
+		return
+	}
+	
+	// Load new configuration
+	newConfig, err := h.configLoader.LoadConfig()
+	if err != nil {
+		h.logger.Error("Failed to load configuration", "error", err)
+		respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load configuration: %v", err))
+		return
+	}
+	
+	// Validate the new configuration
+	if err := validateConfig(newConfig); err != nil {
+		h.logger.Error("Invalid configuration", "error", err)
+		respondError(w, http.StatusBadRequest, fmt.Sprintf("Invalid configuration: %v", err))
+		return
+	}
+	
+	// Apply the new configuration if callback is set
+	if h.onReload != nil {
+		if err := h.onReload(newConfig); err != nil {
+			h.logger.Error("Failed to apply configuration", "error", err)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to apply configuration: %v", err))
+			return
+		}
+	}
+	
+	// Update the handler's config reference
+	h.config = newConfig
+	
+	h.logger.Info("Configuration reloaded successfully")
+	
 	response := map[string]interface{}{
 		"status":    "success",
 		"message":   "Configuration reloaded successfully",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"summary": map[string]interface{}{
+			"listen_addr":     newConfig.ListenAddr,
+			"tls_enabled":     newConfig.TLS.Enabled,
+			"rate_limit":      newConfig.RateLimit.Enabled,
+			"circuit_breaker": newConfig.CircuitBreaker.Enabled,
+		},
 	}
 	
 	respondJSON(w, http.StatusOK, response)
@@ -471,46 +560,30 @@ func (h *Handler) handleReload(w http.ResponseWriter, r *http.Request) {
 
 // handleGetConfig handles GET /api/v1/admin/config
 func (h *Handler) handleGetConfig(w http.ResponseWriter, r *http.Request) {
-	// In a real implementation, this would return the current configuration
-	// For now, return a sample config
+	// Return the current configuration
+	// Note: This returns the full configuration including sensitive data
+	// In production, you might want to filter out sensitive fields
 	
-	config := types.ProxyConfig{
-		ListenAddr:      ":8080",
-		ReadTimeout:     30 * time.Second,
-		WriteTimeout:    30 * time.Second,
-		IdleTimeout:     120 * time.Second,
-		ShutdownTimeout: 30 * time.Second,
-		LoadBalancing: struct {
-			Algorithm string `yaml:"algorithm"`
-			Sticky    struct {
-				Enabled    bool          `yaml:"enabled"`
-				CookieName string        `yaml:"cookie_name"`
-				TTL        time.Duration `yaml:"ttl"`
-			} `yaml:"sticky"`
-		}{
-			Algorithm: "round_robin",
-		},
-		RateLimit: struct {
-			Enabled  bool   `yaml:"enabled"`
-			RPS      int    `yaml:"rps"`
-			Burst    int    `yaml:"burst"`
-			ByHeader string `yaml:"by_header,omitempty"`
-		}{
-			Enabled: true,
-			RPS:     100,
-			Burst:   200,
-		},
-		CircuitBreaker: struct {
-			Enabled          bool          `yaml:"enabled"`
-			FailureThreshold int           `yaml:"failure_threshold"`
-			SuccessThreshold int           `yaml:"success_threshold"`
-			Timeout          time.Duration `yaml:"timeout"`
-		}{
-			Enabled:          true,
-			FailureThreshold: 5,
-			SuccessThreshold: 2,
-			Timeout:          60 * time.Second,
-		},
+	// Create a sanitized copy of the config
+	config := *h.config
+	
+	// Remove sensitive data
+	if config.TLS.Enabled {
+		config.TLS.CertFile = "<redacted>"
+		config.TLS.KeyFile = "<redacted>"
+	}
+	
+	// Remove sensitive auth data
+	if config.Middleware.Auth.Basic.Users != nil {
+		// Just show user count, not actual credentials
+		userCount := len(config.Middleware.Auth.Basic.Users)
+		config.Middleware.Auth.Basic.Users = map[string]string{"<redacted>": fmt.Sprintf("%d users", userCount)}
+	}
+	if config.Middleware.Auth.JWT.KeyFile != "" {
+		config.Middleware.Auth.JWT.KeyFile = "<redacted>"
+	}
+	if config.Middleware.Auth.OAuth2.ClientSecret != "" {
+		config.Middleware.Auth.OAuth2.ClientSecret = "<redacted>"
 	}
 	
 	respondJSON(w, http.StatusOK, config)
@@ -524,27 +597,63 @@ func (h *Handler) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// In a real implementation, this would validate and apply the configuration changes
-	// For now, we'll simulate the operation
-	
 	h.logger.Info("Configuration update requested", "update", update)
 	
-	// Validate the update
+	// Apply updates to current config
+	newConfig := *h.config
+	
+	// Update load balancing if provided
+	if update.LoadBalancing != nil {
+		if update.LoadBalancing.Algorithm != "" {
+			newConfig.LoadBalancing.Algorithm = update.LoadBalancing.Algorithm
+		}
+	}
+	
+	// Update rate limiting if provided
 	if update.RateLimit != nil {
 		if update.RateLimit.RPS < 0 || update.RateLimit.Burst < 0 {
 			respondError(w, http.StatusBadRequest, "Invalid rate limit values")
 			return
 		}
+		newConfig.RateLimit.Enabled = update.RateLimit.Enabled
+		if update.RateLimit.RPS > 0 {
+			newConfig.RateLimit.RPS = update.RateLimit.RPS
+		}
+		if update.RateLimit.Burst > 0 {
+			newConfig.RateLimit.Burst = update.RateLimit.Burst
+		}
 	}
 	
+	// Update circuit breaker if provided
 	if update.CircuitBreaker != nil {
 		if update.CircuitBreaker.FailureThreshold < 0 || update.CircuitBreaker.SuccessThreshold < 0 {
 			respondError(w, http.StatusBadRequest, "Invalid circuit breaker values")
 			return
 		}
+		newConfig.CircuitBreaker.Enabled = update.CircuitBreaker.Enabled
+		if update.CircuitBreaker.FailureThreshold > 0 {
+			newConfig.CircuitBreaker.FailureThreshold = update.CircuitBreaker.FailureThreshold
+		}
+		if update.CircuitBreaker.SuccessThreshold > 0 {
+			newConfig.CircuitBreaker.SuccessThreshold = update.CircuitBreaker.SuccessThreshold
+		}
+		if update.CircuitBreaker.Timeout > 0 {
+			newConfig.CircuitBreaker.Timeout = update.CircuitBreaker.Timeout
+		}
 	}
 	
-	// Simulate applying the update
+	// Apply the new configuration if callback is set
+	if h.onReload != nil {
+		if err := h.onReload(&newConfig); err != nil {
+			h.logger.Error("Failed to apply configuration update", "error", err)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to apply configuration: %v", err))
+			return
+		}
+	}
+	
+	// Update the handler's config reference
+	h.config = &newConfig
+	
 	response := map[string]interface{}{
 		"status":    "success",
 		"message":   "Configuration updated successfully",
@@ -595,6 +704,78 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	respondJSON(w, status, map[string]string{
 		"error": message,
 	})
+}
+
+// formatDuration formats a duration in a human-readable way
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+	
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
+	} else if hours > 0 {
+		return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+	} else if minutes > 0 {
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
+}
+
+// validateConfig validates a proxy configuration
+func validateConfig(config *types.ProxyConfig) error {
+	if config.ListenAddr == "" {
+		return fmt.Errorf("listen_addr is required")
+	}
+	
+	// Validate timeouts
+	if config.ReadTimeout <= 0 {
+		return fmt.Errorf("read_timeout must be positive")
+	}
+	if config.WriteTimeout <= 0 {
+		return fmt.Errorf("write_timeout must be positive")
+	}
+	
+	// Validate load balancing algorithm
+	validAlgorithms := map[string]bool{
+		"round_robin": true,
+		"weighted":    true,
+		"least_conn":  true,
+		"ip_hash":     true,
+	}
+	if !validAlgorithms[config.LoadBalancing.Algorithm] {
+		return fmt.Errorf("invalid load balancing algorithm: %s", config.LoadBalancing.Algorithm)
+	}
+	
+	// Validate TLS configuration if enabled
+	if config.TLS.Enabled {
+		if !config.TLS.AutoCert && (config.TLS.CertFile == "" || config.TLS.KeyFile == "") {
+			return fmt.Errorf("cert_file and key_file are required when TLS is enabled and auto_cert is false")
+		}
+	}
+	
+	// Validate rate limiting
+	if config.RateLimit.Enabled {
+		if config.RateLimit.RPS <= 0 {
+			return fmt.Errorf("rate limit RPS must be positive")
+		}
+		if config.RateLimit.Burst < config.RateLimit.RPS {
+			return fmt.Errorf("rate limit burst must be >= RPS")
+		}
+	}
+	
+	// Validate circuit breaker
+	if config.CircuitBreaker.Enabled {
+		if config.CircuitBreaker.FailureThreshold <= 0 {
+			return fmt.Errorf("circuit breaker failure threshold must be positive")
+		}
+		if config.CircuitBreaker.SuccessThreshold <= 0 {
+			return fmt.Errorf("circuit breaker success threshold must be positive")
+		}
+	}
+	
+	return nil
 }
 
 var startTime = time.Now()

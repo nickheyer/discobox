@@ -2,6 +2,10 @@ package proxy
 
 import (
 	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"os"
+	
 	"discobox/internal/types"
 	"net"
 	"net/http"
@@ -58,16 +62,16 @@ func NewTransport(config types.ProxyConfig) http.RoundTripper {
 
 	// Configure HTTP/2
 	if config.HTTP2.Enabled {
-		if err := http2.ConfigureTransport(transport); err != nil {
-			// Log error but continue
-		}
+		// ConfigureTransport modifies the transport to support HTTP/2.
+		// If it returns an error, the transport will still work for HTTP/1.1
+		_ = http2.ConfigureTransport(transport)
 	}
 
 	return transport
 }
 
 // NewBackendTransport creates a transport for connecting to backend services
-func NewBackendTransport(service *types.Service, config types.ProxyConfig) http.RoundTripper {
+func NewBackendTransport(service *types.Service, config types.ProxyConfig) (http.RoundTripper, error) {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -94,18 +98,41 @@ func NewBackendTransport(service *types.Service, config types.ProxyConfig) http.
 
 		// Add root CAs if provided
 		if len(service.TLS.RootCAs) > 0 {
-			// TODO: Parse and add root CAs
+			rootCAs := x509.NewCertPool()
+			for _, ca := range service.TLS.RootCAs {
+				// Try to load as file first
+				if pemData, err := os.ReadFile(ca); err == nil {
+					if !rootCAs.AppendCertsFromPEM(pemData) {
+						return nil, fmt.Errorf("failed to parse root CA from file %s", ca)
+					}
+				} else {
+					// Treat as PEM data directly
+					if !rootCAs.AppendCertsFromPEM([]byte(ca)) {
+						return nil, fmt.Errorf("failed to parse root CA PEM data")
+					}
+				}
+			}
+			tlsConfig.RootCAs = rootCAs
 		}
 
 		// Add client certificate if provided
 		if service.TLS.ClientCert != "" && service.TLS.ClientKey != "" {
-			// In production, load and add client certificate
+			// Try to load as files first
+			cert, err := tls.LoadX509KeyPair(service.TLS.ClientCert, service.TLS.ClientKey)
+			if err != nil {
+				// Try as PEM data directly
+				cert, err = tls.X509KeyPair([]byte(service.TLS.ClientCert), []byte(service.TLS.ClientKey))
+				if err != nil {
+					return nil, fmt.Errorf("failed to load client certificate: %w", err)
+				}
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
 
 		transport.TLSClientConfig = tlsConfig
 	}
 
-	return transport
+	return transport, nil
 }
 
 // getTLSVersion converts string TLS version to tls constant
