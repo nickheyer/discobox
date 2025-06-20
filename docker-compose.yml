@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  discobox:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      args:
+        VERSION: ${VERSION:-latest}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    image: discobox:${VERSION:-latest}
+    container_name: discobox
+    restart: unless-stopped
+    ports:
+      # Main proxy port
+      - "8080:8080"
+      # Admin API port
+      - "8081:8081"
+      # Metrics port
+      - "9090:9090"
+    environment:
+      # Override configuration via environment variables
+      - DISCOBOX_LOG_LEVEL=${LOG_LEVEL:-info}
+      - DISCOBOX_LOG_FORMAT=${LOG_FORMAT:-json}
+    volumes:
+      # Configuration
+      - ./configs:/etc/discobox:ro
+      # Data storage (SQLite database)
+      - discobox-data:/var/lib/discobox
+      # Logs
+      - discobox-logs:/var/log/discobox
+      # Static files (if customized)
+      - ./static:/app/static:ro
+    networks:
+      - discobox-net
+      - backend-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Example backend services for testing
+  # Remove these in production
+  example-web-1:
+    image: nginx:alpine
+    container_name: example-web-1
+    networks:
+      - backend-net
+    volumes:
+      - ./examples/web-content:/usr/share/nginx/html:ro
+    labels:
+      - "discobox.enable=true"
+      - "discobox.service=web-app"
+      - "discobox.weight=1"
+
+  example-web-2:
+    image: nginx:alpine
+    container_name: example-web-2
+    networks:
+      - backend-net
+    volumes:
+      - ./examples/web-content:/usr/share/nginx/html:ro
+    labels:
+      - "discobox.enable=true"
+      - "discobox.service=web-app"
+      - "discobox.weight=1"
+
+  example-api:
+    image: node:alpine
+    container_name: example-api
+    working_dir: /app
+    command: node server.js
+    networks:
+      - backend-net
+    volumes:
+      - ./examples/api:/app:ro
+    environment:
+      - PORT=3000
+    labels:
+      - "discobox.enable=true"
+      - "discobox.service=api-service"
+      - "discobox.health=/health"
+
+networks:
+  discobox-net:
+    driver: bridge
+    name: discobox-network
+  backend-net:
+    driver: bridge
+    name: backend-network
+
+volumes:
+  discobox-data:
+    name: discobox-data
+  discobox-logs:
+    name: discobox-logs
+
+# Production deployment example
+# Remove example services and use external networks:
+#
+# networks:
+#   discobox-net:
+#     external: true
+#     name: proxy-network
+#   backend-net:
+#     external: true
+#     name: application-network
