@@ -122,9 +122,14 @@ func (l *Loader) SaveConfig(cfg *types.ProxyConfig) error {
 	return nil
 }
 
-// LoadBootstrapData loads services and routes from configuration file for bootstrapping
+// LoadBootstrapData loads services, routes, and users from configuration file for bootstrapping
 func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 	ctx := context.Background()
+	
+	// Bootstrap admin user first
+	if err := l.bootstrapAdminUser(storage); err != nil {
+		l.logger.Error("failed to bootstrap admin user", "error", err)
+	}
 	
 	// Check if we have services defined in config
 	servicesRaw := viper.Get("services")
@@ -258,6 +263,67 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 			}
 		}
 	}
+	
+	return nil
+}
+
+// bootstrapAdminUser creates an admin user if none exists
+func (l *Loader) bootstrapAdminUser(storage types.Storage) error {
+	ctx := context.Background()
+	
+	// Check if any users exist
+	users, err := storage.ListUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list users: %w", err)
+	}
+	
+	// If users exist, skip bootstrap
+	if len(users) > 0 {
+		l.logger.Info("Users already exist, skipping admin bootstrap")
+		return nil
+	}
+	
+	// Create admin user
+	adminUsername := viper.GetString("admin.username")
+	if adminUsername == "" {
+		adminUsername = "admin"
+	}
+	
+	adminPassword := viper.GetString("admin.password")
+	if adminPassword == "" {
+		// Generate a random password if not specified
+		adminPassword = generateRandomPassword(16)
+		l.logger.Warn("No admin password specified, generated random password", "username", adminUsername, "password", adminPassword)
+		l.logger.Warn("IMPORTANT: Please change this password immediately after first login!")
+	}
+	
+	// Hash password
+	hashedPassword, err := hashPassword(adminPassword)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+	
+	// Create admin user
+	adminUser := &types.User{
+		ID:                 generateID("user"),
+		Username:           adminUsername,
+		PasswordHash:       hashedPassword,
+		Email:              viper.GetString("admin.email"),
+		IsAdmin:            true,
+		MustChangePassword: true, // Force password change on first login
+		Active:             true,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+		Metadata: map[string]string{
+			"created_by": "bootstrap",
+		},
+	}
+	
+	if err := storage.CreateUser(ctx, adminUser); err != nil {
+		return fmt.Errorf("failed to create admin user: %w", err)
+	}
+	
+	l.logger.Info("Created bootstrap admin user", "username", adminUsername, "must_change_password", true)
 	
 	return nil
 }

@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"net/url"
+	"time"
+)
 
 // ProxyConfig represents the complete proxy configuration
 type ProxyConfig struct {
@@ -159,4 +162,9 @@ type ProxyConfig struct {
 		Enabled bool   `yaml:"enabled" mapstructure:"enabled"`
 		Path    string `yaml:"path" mapstructure:"path"`
 	} `yaml:"ui" mapstructure:"ui"`
+}
+
+// ParseURL is a helper function to parse URLs
+func ParseURL(urlStr string) (*url.URL, error) {
+	return url.Parse(urlStr)
 }

@@ -161,12 +161,18 @@ api:
   enabled: true
   addr: ":8081"
   auth: true  # Requires authentication
-  api_key: "dev-api-key-12345"  # API key for authentication
+  api_key: ""  # Set via DISCOBOX_API_API_KEY environment variable
 
 # Web UI configuration
 ui:
   enabled: true
   path: "/"
+
+# Admin bootstrap configuration
+admin:
+  username: "admin"
+  password: "admin"  # Set via DISCOBOX_ADMIN_PASSWORD environment variable
+  email: "admin@example.com"
 
 # Example services configuration
 # These would typically be managed via the API or loaded from storage

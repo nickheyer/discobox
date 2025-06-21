@@ -431,6 +431,238 @@ func (s *etcdStorage) Close() error {
 	return s.client.Close()
 }
 
+// Users implementation
+
+func (s *etcdStorage) GetUser(ctx context.Context, id string) (*types.User, error) {
+	key := s.userKey(id)
+	resp, err := s.client.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	if len(resp.Kvs) == 0 {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	var user types.User
+	if err := json.Unmarshal(resp.Kvs[0].Value, &user); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal user: %w", err)
+	}
+
+	return &user, nil
+}
+
+func (s *etcdStorage) GetUserByUsername(ctx context.Context, username string) (*types.User, error) {
+	// List all users and find by username
+	users, err := s.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, user := range users {
+		if user.Username == username {
+			return user, nil
+		}
+	}
+
+	return nil, fmt.Errorf("user not found")
+}
+
+func (s *etcdStorage) ListUsers(ctx context.Context) ([]*types.User, error) {
+	prefix := s.prefix + "/users/"
+	resp, err := s.client.Get(ctx, prefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	users := make([]*types.User, 0, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		var user types.User
+		if err := json.Unmarshal(kv.Value, &user); err != nil {
+			continue // Skip invalid entries
+		}
+		users = append(users, &user)
+	}
+
+	return users, nil
+}
+
+func (s *etcdStorage) CreateUser(ctx context.Context, user *types.User) error {
+	key := s.userKey(user.ID)
+
+	// Check if already exists
+	resp, err := s.client.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %w", err)
+	}
+	if len(resp.Kvs) > 0 {
+		return fmt.Errorf("user already exists")
+	}
+
+	// Marshal user
+	data, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user: %w", err)
+	}
+
+	// Create user
+	if _, err := s.client.Put(ctx, key, string(data)); err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return nil
+}
+
+func (s *etcdStorage) UpdateUser(ctx context.Context, user *types.User) error {
+	key := s.userKey(user.ID)
+
+	// Check if exists
+	resp, err := s.client.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %w", err)
+	}
+	if len(resp.Kvs) == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	// Marshal user
+	data, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user: %w", err)
+	}
+
+	// Update user
+	if _, err := s.client.Put(ctx, key, string(data)); err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	return nil
+}
+
+func (s *etcdStorage) DeleteUser(ctx context.Context, id string) error {
+	key := s.userKey(id)
+
+	// Delete user
+	resp, err := s.client.Delete(ctx, key)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	if resp.Deleted == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	// Delete all API keys for this user
+	apiKeys, _ := s.ListAPIKeysByUser(ctx, id)
+	for _, apiKey := range apiKeys {
+		s.RevokeAPIKey(ctx, apiKey.Key)
+	}
+
+	return nil
+}
+
+// API Keys implementation
+
+func (s *etcdStorage) GetAPIKey(ctx context.Context, key string) (*types.APIKey, error) {
+	keyPath := s.apiKeyKey(key)
+	resp, err := s.client.Get(ctx, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get API key: %w", err)
+	}
+
+	if len(resp.Kvs) == 0 {
+		return nil, fmt.Errorf("API key not found")
+	}
+
+	var apiKey types.APIKey
+	if err := json.Unmarshal(resp.Kvs[0].Value, &apiKey); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal API key: %w", err)
+	}
+
+	// Update last used timestamp
+	now := time.Now()
+	apiKey.LastUsedAt = &now
+	data, _ := json.Marshal(apiKey)
+	s.client.Put(ctx, keyPath, string(data))
+
+	return &apiKey, nil
+}
+
+func (s *etcdStorage) ListAPIKeysByUser(ctx context.Context, userID string) ([]*types.APIKey, error) {
+	prefix := s.prefix + "/api_keys/"
+	resp, err := s.client.Get(ctx, prefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list API keys: %w", err)
+	}
+
+	var apiKeys []*types.APIKey
+	for _, kv := range resp.Kvs {
+		var apiKey types.APIKey
+		if err := json.Unmarshal(kv.Value, &apiKey); err != nil {
+			continue // Skip invalid entries
+		}
+		if apiKey.UserID == userID {
+			apiKeys = append(apiKeys, &apiKey)
+		}
+	}
+
+	return apiKeys, nil
+}
+
+func (s *etcdStorage) CreateAPIKey(ctx context.Context, apiKey *types.APIKey) error {
+	key := s.apiKeyKey(apiKey.Key)
+
+	// Check if already exists
+	resp, err := s.client.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("failed to check API key existence: %w", err)
+	}
+	if len(resp.Kvs) > 0 {
+		return fmt.Errorf("API key already exists")
+	}
+
+	// Marshal API key
+	data, err := json.Marshal(apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal API key: %w", err)
+	}
+
+	// Create API key
+	if _, err := s.client.Put(ctx, key, string(data)); err != nil {
+		return fmt.Errorf("failed to create API key: %w", err)
+	}
+
+	return nil
+}
+
+func (s *etcdStorage) RevokeAPIKey(ctx context.Context, key string) error {
+	keyPath := s.apiKeyKey(key)
+
+	// Get API key
+	resp, err := s.client.Get(ctx, keyPath)
+	if err != nil {
+		return fmt.Errorf("failed to get API key: %w", err)
+	}
+
+	if len(resp.Kvs) == 0 {
+		return fmt.Errorf("API key not found")
+	}
+
+	var apiKey types.APIKey
+	if err := json.Unmarshal(resp.Kvs[0].Value, &apiKey); err != nil {
+		return fmt.Errorf("failed to unmarshal API key: %w", err)
+	}
+
+	// Mark as inactive
+	apiKey.Active = false
+	data, _ := json.Marshal(apiKey)
+	if _, err := s.client.Put(ctx, keyPath, string(data)); err != nil {
+		return fmt.Errorf("failed to revoke API key: %w", err)
+	}
+
+	return nil
+}
+
 // Helper methods
 
 func (s *etcdStorage) serviceKey(id string) string {
@@ -439,4 +671,12 @@ func (s *etcdStorage) serviceKey(id string) string {
 
 func (s *etcdStorage) routeKey(id string) string {
 	return fmt.Sprintf("%s/routes/%s", s.prefix, id)
+}
+
+func (s *etcdStorage) userKey(id string) string {
+	return fmt.Sprintf("%s/users/%s", s.prefix, id)
+}
+
+func (s *etcdStorage) apiKeyKey(key string) string {
+	return fmt.Sprintf("%s/api_keys/%s", s.prefix, key)
 }

@@ -5,6 +5,7 @@
 BINARY_NAME=discobox
 MAIN_PATH=./cmd/discobox
 BUILD_DIR=./build
+DB_DIR=./data
 DIST_DIR=./dist
 DOCKER_IMAGE=discobox
 DOCKER_TAG?=latest
@@ -132,7 +133,7 @@ vet:
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -rf $(BUILD_DIR) $(DIST_DIR) $(COVERAGE_DIR)
+	@rm -rf $(BUILD_DIR) $(DIST_DIR) $(COVERAGE_DIR) $(DB_DIR)
 	@rm -f cpu.prof mem.prof
 	@echo "Clean complete"
 

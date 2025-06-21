@@ -87,6 +87,20 @@ type Storage interface {
 	UpdateRoute(ctx context.Context, route *Route) error
 	DeleteRoute(ctx context.Context, id string) error
 	
+	// Users
+	GetUser(ctx context.Context, id string) (*User, error)
+	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	ListUsers(ctx context.Context) ([]*User, error)
+	CreateUser(ctx context.Context, user *User) error
+	UpdateUser(ctx context.Context, user *User) error
+	DeleteUser(ctx context.Context, id string) error
+	
+	// API Keys
+	GetAPIKey(ctx context.Context, key string) (*APIKey, error)
+	ListAPIKeysByUser(ctx context.Context, userID string) ([]*APIKey, error)
+	CreateAPIKey(ctx context.Context, apiKey *APIKey) error
+	RevokeAPIKey(ctx context.Context, key string) error
+	
 	// Watch for changes
 	Watch(ctx context.Context) <-chan StorageEvent
 	

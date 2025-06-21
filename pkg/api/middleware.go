@@ -103,7 +103,8 @@ func authMiddleware(next http.Handler, config *AuthConfig) http.Handler {
 			if headerName == "" {
 				headerName = "X-API-Key"
 			}
-			if !checkAPIKey(r, config.Token, headerName) {
+			// If no static token configured, authentication will be handled per-request
+			if config.Token != "" && !checkAPIKey(r, config.Token, headerName) {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}

@@ -9,30 +9,64 @@
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
-    <nav class="container-fluid">
-        <ul>
-            <li><strong>Discobox</strong></li>
-        </ul>
-        <ul>
-            <li><a href="#" @click="showAuth = !showAuth" x-show="!apiKey">Login</a></li>
-            <li><a href="#" @click="logout()" x-show="apiKey">Logout</a></li>
-        </ul>
-    </nav>
+    <div x-data="discobox()">
+        <nav class="container-fluid">
+            <ul>
+                <li><strong>Discobox</strong></li>
+            </ul>
+            <ul>
+                <li><a href="#" @click="showAuth = !showAuth" x-show="!apiKey">Login</a></li>
+                <li><a href="#" @click="logout()" x-show="apiKey">Logout</a></li>
+            </ul>
+        </nav>
 
-    <main class="container" x-data="discobox()">
+        <main class="container">
         <!-- Auth Modal -->
         <dialog :open="showAuth && !apiKey">
             <article>
                 <header>
-                    <h3>API Authentication</h3>
+                    <h3>Login</h3>
                 </header>
-                <form @submit.prevent="authenticate()">
+                <form @submit.prevent="login()">
                     <label>
-                        API Key
-                        <input type="password" x-model="authKey" placeholder="Enter your API key" required autofocus>
+                        Username
+                        <input type="text" x-model="loginForm.username" placeholder="Enter your username" required autofocus>
                     </label>
+                    <label>
+                        Password
+                        <input type="password" x-model="loginForm.password" placeholder="Enter your password" required>
+                    </label>
+                    <div x-show="loginError" role="alert" style="color: var(--del-color);">
+                        <small x-text="loginError"></small>
+                    </div>
                     <footer>
-                        <button type="submit">Authenticate</button>
+                        <button type="submit" :aria-busy="loggingIn">Login</button>
+                    </footer>
+                </form>
+            </article>
+        </dialog>
+        
+        <!-- Password Change Modal -->
+        <dialog :open="showPasswordChange">
+            <article>
+                <header>
+                    <h3>Change Password Required</h3>
+                </header>
+                <p>You must change your password before continuing.</p>
+                <form @submit.prevent="changePassword()">
+                    <label>
+                        New Password
+                        <input type="password" x-model="passwordForm.newPassword" placeholder="Enter new password" required autofocus>
+                    </label>
+                    <label>
+                        Confirm Password
+                        <input type="password" x-model="passwordForm.confirmPassword" placeholder="Confirm new password" required>
+                    </label>
+                    <div x-show="passwordError" role="alert" style="color: var(--del-color);">
+                        <small x-text="passwordError"></small>
+                    </div>
+                    <footer>
+                        <button type="submit">Change Password</button>
                     </footer>
                 </form>
             </article>
@@ -283,17 +317,21 @@
                 </footer>
             </article>
         </dialog>
-    </main>
+        </main>
 
     <script>
         function discobox() {
             return {
                 // State
                 apiKey: localStorage.getItem('discobox_api_key') || '',
-                authKey: '',
+                currentUser: null,
                 showAuth: false,
+                showPasswordChange: false,
                 loading: false,
+                loggingIn: false,
                 error: null,
+                loginError: null,
+                passwordError: null,
                 
                 // Data
                 health: {},
@@ -310,6 +348,14 @@
                 editingRoute: null,
                 
                 // Forms
+                loginForm: {
+                    username: '',
+                    password: ''
+                },
+                passwordForm: {
+                    newPassword: '',
+                    confirmPassword: ''
+                },
                 serviceForm: {
                     id: '',
                     name: '',
@@ -367,16 +413,82 @@
                 },
 
                 // Auth
-                async authenticate() {
-                    this.apiKey = this.authKey;
-                    localStorage.setItem('discobox_api_key', this.apiKey);
-                    this.showAuth = false;
-                    this.authKey = '';
-                    await this.loadData();
+                async login() {
+                    this.loggingIn = true;
+                    this.loginError = null;
+                    
+                    try {
+                        const response = await fetch('/api/v1/auth/login', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(this.loginForm)
+                        });
+                        
+                        if (!response.ok) {
+                            const error = await response.json();
+                            throw new Error(error.error || 'Login failed');
+                        }
+                        
+                        const data = await response.json();
+                        this.currentUser = data.user;
+                        this.apiKey = data.api_key;
+                        localStorage.setItem('discobox_api_key', this.apiKey);
+                        
+                        // Clear form
+                        this.loginForm.username = '';
+                        this.loginForm.password = '';
+                        this.showAuth = false;
+                        
+                        // Check if password change required
+                        if (this.currentUser.must_change_password) {
+                            this.showPasswordChange = true;
+                        } else {
+                            await this.loadData();
+                        }
+                    } catch (err) {
+                        this.loginError = err.message;
+                    } finally {
+                        this.loggingIn = false;
+                    }
+                },
+                
+                async changePassword() {
+                    this.passwordError = null;
+                    
+                    if (this.passwordForm.newPassword !== this.passwordForm.confirmPassword) {
+                        this.passwordError = 'Passwords do not match';
+                        return;
+                    }
+                    
+                    if (this.passwordForm.newPassword.length < 8) {
+                        this.passwordError = 'Password must be at least 8 characters';
+                        return;
+                    }
+                    
+                    try {
+                        const response = await this.api(`/api/v1/users/${this.currentUser.id}/password`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                new_password: this.passwordForm.newPassword
+                            })
+                        });
+                        
+                        // Password changed successfully
+                        this.showPasswordChange = false;
+                        this.passwordForm.newPassword = '';
+                        this.passwordForm.confirmPassword = '';
+                        
+                        await this.loadData();
+                    } catch (err) {
+                        this.passwordError = err.message;
+                    }
                 },
 
                 logout() {
                     this.apiKey = '';
+                    this.currentUser = null;
                     localStorage.removeItem('discobox_api_key');
                     this.showAuth = true;
                     this.health = {};
@@ -573,5 +685,6 @@
             };
         }
     </script>
+    </div>
 </body>
 </html>

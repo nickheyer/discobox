@@ -58,6 +58,7 @@ func (h *Handler) Router() http.Handler {
 	// Public endpoints (no auth required)
 	publicRouter := mainRouter.PathPrefix("/").Subrouter()
 	publicRouter.HandleFunc("/health", h.handleHealth).Methods("GET")
+	publicRouter.HandleFunc("/api/v1/auth/login", h.handleLogin).Methods("POST", "OPTIONS")
 	
 	// Apply only CORS and logging middleware to public routes
 	publicRouter.Use(func(next http.Handler) http.Handler {
@@ -84,6 +85,22 @@ func (h *Handler) Router() http.Handler {
 	// Metrics
 	apiRouter.HandleFunc("/metrics", h.handleMetrics).Methods("GET", "OPTIONS")
 	
+	// Users
+	apiRouter.HandleFunc("/users", h.handleListUsers).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/users", h.handleCreateUser).Methods("POST", "OPTIONS")
+	apiRouter.HandleFunc("/users/{id}", h.handleGetUser).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/users/{id}", h.handleUpdateUser).Methods("PUT", "OPTIONS")
+	apiRouter.HandleFunc("/users/{id}", h.handleDeleteUser).Methods("DELETE", "OPTIONS")
+	apiRouter.HandleFunc("/users/{id}/password", h.handleChangePassword).Methods("POST", "OPTIONS")
+	apiRouter.HandleFunc("/users/{id}/api-keys", h.handleListUserAPIKeys).Methods("GET", "OPTIONS")
+	apiRouter.HandleFunc("/users/{id}/api-keys", h.handleCreateAPIKey).Methods("POST", "OPTIONS")
+	
+	// API Keys
+	apiRouter.HandleFunc("/api-keys/{key}", h.handleRevokeAPIKey).Methods("DELETE", "OPTIONS")
+	
+	// Auth (whoami is protected, login is public)
+	apiRouter.HandleFunc("/auth/whoami", h.handleWhoAmI).Methods("GET", "OPTIONS")
+	
 	// Admin
 	apiRouter.HandleFunc("/admin/reload", h.handleReload).Methods("POST", "OPTIONS")
 	apiRouter.HandleFunc("/admin/config", h.handleGetConfig).Methods("GET", "OPTIONS")
@@ -102,15 +119,23 @@ func (h *Handler) Router() http.Handler {
 	
 	// Apply auth middleware to API routes last
 	if h.config.API.Auth {
-		authConfig := &AuthConfig{
-			Enabled: true,
-			Type:    "api-key",
-			Token:   h.config.API.APIKey,
-			HeaderName: "X-API-Key",
-		}
+		// Use storage-based authentication
 		apiRouter.Use(func(next http.Handler) http.Handler {
-			return authMiddleware(next, authConfig)
+			return storageAuthMiddleware(next, h.storage, h.logger)
 		})
+		
+		// If static API key is configured, also allow that
+		if h.config.API.APIKey != "" {
+			authConfig := &AuthConfig{
+				Enabled: true,
+				Type:    "api-key",
+				Token:   h.config.API.APIKey,
+				HeaderName: "X-API-Key",
+			}
+			apiRouter.Use(func(next http.Handler) http.Handler {
+				return authMiddleware(next, authConfig)
+			})
+		}
 	}
 	
 	return mainRouter
