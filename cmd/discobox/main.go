@@ -11,7 +11,7 @@ import (
 	"discobox/internal/storage"
 	"discobox/internal/types"
 	"discobox/pkg/api"
-	"discobox/pkg/ui"
+	discobox_ui "discobox/pkg/ui/discobox"
 	"flag"
 	"fmt"
 	"net/http"
@@ -159,7 +159,7 @@ func initializeApp(cfg *types.ProxyConfig, logger types.Logger, loader *config.L
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize storage: %w", err)
 	}
-	
+
 	// Load bootstrap data from configuration
 	if err := loader.LoadBootstrapData(store); err != nil {
 		logger.Error("Failed to load bootstrap data", "error", err)
@@ -214,14 +214,14 @@ func initializeApp(cfg *types.ProxyConfig, logger types.Logger, loader *config.L
 
 	// Build middleware chain
 	proxyHandler := buildMiddlewareChain(cfg, reverseProxy, logger)
-	
+
 	// Create combined handler with UI fallback if enabled
 	var handler http.Handler = proxyHandler
 	if cfg.UI.Enabled {
 		handler = &uiProxyHandler{
-			proxy:   proxyHandler,
-			ui:      ui.Handler(),
-			uiPath:  cfg.UI.Path,
+			proxy:  proxyHandler,
+			ui:     http.FileServer(discobox_ui.GetFileSystem()),
+			uiPath: cfg.UI.Path,
 		}
 	}
 
@@ -403,7 +403,7 @@ func (h *uiProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		proxy.ServeHTTP(w, r)
 		return
 	}
-	
+
 	// Create a custom response writer to intercept 404s
 	rw := &interceptResponseWriter{
 		ResponseWriter: w,
@@ -411,10 +411,10 @@ func (h *uiProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		headers:        make(http.Header),
 		body:           make([]byte, 0, 512),
 	}
-	
+
 	// Try the proxy first
 	h.proxy.ServeHTTP(rw, r)
-	
+
 	// If proxy returned 404, serve UI instead
 	if rw.statusCode == http.StatusNotFound {
 		// Clear any headers set by proxy
@@ -425,7 +425,7 @@ func (h *uiProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.ui.ServeHTTP(w, r)
 		return
 	}
-	
+
 	// Otherwise, write the intercepted response
 	rw.flush()
 }
@@ -467,13 +467,13 @@ func (rw *interceptResponseWriter) Write(b []byte) (int, error) {
 	if !rw.headerWritten && rw.statusCode != http.StatusNotFound {
 		rw.WriteHeader(rw.statusCode)
 	}
-	
+
 	if rw.intercepting {
 		// Buffer the 404 response body
 		rw.body = append(rw.body, b...)
 		return len(b), nil
 	}
-	
+
 	return rw.ResponseWriter.Write(b)
 }
 
@@ -489,4 +489,3 @@ func (rw *interceptResponseWriter) flush() {
 		rw.ResponseWriter.Write(rw.body)
 	}
 }
-

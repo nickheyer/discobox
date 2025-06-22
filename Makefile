@@ -63,7 +63,7 @@ build-all: clean
 # Run the application
 run: build
 	@echo "Running $(BINARY_NAME)..."
-	$(BUILD_DIR)/$(BINARY_NAME) -config configs/discobox.yaml
+	$(BUILD_DIR)/$(BINARY_NAME) -config configs/discobox.yml
 
 # Development mode with hot reload
 dev: clean

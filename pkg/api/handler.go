@@ -101,10 +101,11 @@ func (h *Handler) Router() http.Handler {
 	// Auth (whoami is protected, login is public)
 	apiRouter.HandleFunc("/auth/whoami", h.handleWhoAmI).Methods("GET", "OPTIONS")
 	
-	// Admin
-	apiRouter.HandleFunc("/admin/reload", h.handleReload).Methods("POST", "OPTIONS")
-	apiRouter.HandleFunc("/admin/config", h.handleGetConfig).Methods("GET", "OPTIONS")
-	apiRouter.HandleFunc("/admin/config", h.handleUpdateConfig).Methods("PUT", "OPTIONS")
+	// Admin endpoints - create a subrouter for admin-only endpoints
+	adminRouter := apiRouter.PathPrefix("/admin").Subrouter()
+	adminRouter.HandleFunc("/reload", h.handleReload).Methods("POST", "OPTIONS")
+	adminRouter.HandleFunc("/config", h.handleGetConfig).Methods("GET", "OPTIONS")
+	adminRouter.HandleFunc("/config", h.handleUpdateConfig).Methods("PUT", "OPTIONS")
 	
 	// Apply common middleware to API routes first
 	apiRouter.Use(func(next http.Handler) http.Handler {
@@ -136,6 +137,9 @@ func (h *Handler) Router() http.Handler {
 				return authMiddleware(next, authConfig)
 			})
 		}
+		
+		// Apply admin middleware to admin routes after auth
+		adminRouter.Use(requireAdminMiddleware)
 	}
 	
 	return mainRouter

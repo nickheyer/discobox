@@ -12,6 +12,12 @@ import (
 // storageAuthMiddleware provides database-backed authentication
 func storageAuthMiddleware(next http.Handler, storage types.Storage, logger types.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth for public endpoints
+		if isPublicEndpoint(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		
 		// Get API key from header
 		apiKey := r.Header.Get("X-API-Key")
 		if apiKey == "" {
@@ -98,10 +104,7 @@ func isPublicEndpoint(path string) bool {
 		return true
 	}
 	
-	// Check if it's an OPTIONS request (for CORS)
-	if strings.HasSuffix(path, "/") {
-		path = path[:len(path)-1]
-	}
-	
+	// Also check without trailing slash
+	path = strings.TrimSuffix(path, "/")
 	return publicEndpoints[path]
 }
