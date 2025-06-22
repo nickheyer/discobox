@@ -48,6 +48,12 @@ var (
 	
 	// ErrMaxConnectionsReached indicates max connections limit reached
 	ErrMaxConnectionsReached = errors.New("maximum connections reached")
+	
+	// ErrInvalidWeight indicates an invalid weight value
+	ErrInvalidWeight = errors.New("invalid weight value")
+	
+	// ErrServerNotFound indicates the requested server does not exist
+	ErrServerNotFound = errors.New("server not found")
 )
 
 // ValidationError represents a validation error with details

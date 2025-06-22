@@ -31,6 +31,15 @@ func NewEtcd(endpoints []string, prefix string) (types.Storage, error) {
 		return nil, fmt.Errorf("failed to create etcd client: %w", err)
 	}
 
+	// Test connection by attempting a simple operation with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = client.Status(ctx, endpoints[0])
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
+	}
+
 	if prefix == "" {
 		prefix = "/discobox"
 	}
@@ -100,6 +109,11 @@ func (s *etcdStorage) CreateService(ctx context.Context, service *types.Service)
 		return types.ErrAlreadyExists
 	}
 
+	// Set timestamps
+	now := time.Now()
+	service.CreatedAt = now
+	service.UpdatedAt = now
+
 	// Marshal service
 	data, err := json.Marshal(service)
 	if err != nil {
@@ -134,6 +148,15 @@ func (s *etcdStorage) UpdateService(ctx context.Context, service *types.Service)
 		return types.ErrServiceNotFound
 	}
 
+	// Preserve created timestamp
+	var existing types.Service
+	if err := json.Unmarshal(resp.Kvs[0].Value, &existing); err == nil {
+		service.CreatedAt = existing.CreatedAt
+	}
+
+	// Update timestamp
+	service.UpdatedAt = time.Now()
+
 	// Marshal service
 	data, err := json.Marshal(service)
 	if err != nil {
@@ -159,13 +182,30 @@ func (s *etcdStorage) UpdateService(ctx context.Context, service *types.Service)
 func (s *etcdStorage) DeleteService(ctx context.Context, id string) error {
 	key := s.serviceKey(id)
 
+	// Check if service exists
+	resp, err := s.client.Get(ctx, key)
+	if err != nil {
+		return fmt.Errorf("failed to check service existence: %w", err)
+	}
+	if len(resp.Kvs) == 0 {
+		return types.ErrServiceNotFound
+	}
+
+	// Delete all routes for this service
+	routes, _ := s.ListRoutes(ctx)
+	for _, route := range routes {
+		if route.ServiceID == id {
+			s.DeleteRoute(ctx, route.ID)
+		}
+	}
+
 	// Delete service
-	resp, err := s.client.Delete(ctx, key)
+	resp2, err := s.client.Delete(ctx, key)
 	if err != nil {
 		return fmt.Errorf("failed to delete service: %w", err)
 	}
 
-	if resp.Deleted == 0 {
+	if resp2.Deleted == 0 {
 		return types.ErrServiceNotFound
 	}
 
@@ -216,6 +256,15 @@ func (s *etcdStorage) ListRoutes(ctx context.Context) ([]*types.Route, error) {
 		routes = append(routes, &route)
 	}
 
+	// Sort by priority (descending)
+	for i := 0; i < len(routes); i++ {
+		for j := i + 1; j < len(routes); j++ {
+			if routes[i].Priority < routes[j].Priority {
+				routes[i], routes[j] = routes[j], routes[i]
+			}
+		}
+	}
+
 	return routes, nil
 }
 
@@ -229,6 +278,11 @@ func (s *etcdStorage) CreateRoute(ctx context.Context, route *types.Route) error
 	}
 	if len(resp.Kvs) > 0 {
 		return types.ErrAlreadyExists
+	}
+
+	// Validate service exists
+	if _, err := s.GetService(ctx, route.ServiceID); err != nil {
+		return fmt.Errorf("service %s not found", route.ServiceID)
 	}
 
 	// Marshal route
@@ -264,6 +318,8 @@ func (s *etcdStorage) UpdateRoute(ctx context.Context, route *types.Route) error
 	if len(resp.Kvs) == 0 {
 		return types.ErrRouteNotFound
 	}
+
+	// Route doesn't have timestamps, just update directly
 
 	// Marshal route
 	data, err := json.Marshal(route)
@@ -338,13 +394,29 @@ func (s *etcdStorage) Watch(ctx context.Context) <-chan types.StorageEvent {
 
 // watchChanges watches etcd for changes
 func (s *etcdStorage) watchChanges() {
-	watchChan := s.client.Watch(context.Background(), s.prefix, clientv3.WithPrefix())
+	// Create a cancellable context for the watch
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cancel the watch context when stopWatch is closed
+	go func() {
+		<-s.stopWatch
+		cancel()
+	}()
+
+	watchChan := s.client.Watch(ctx, s.prefix, clientv3.WithPrefix())
 
 	for {
 		select {
 		case <-s.stopWatch:
 			return
-		case resp := <-watchChan:
+		case resp, ok := <-watchChan:
+			if !ok {
+				return
+			}
+			if resp.Canceled {
+				return
+			}
 			for _, event := range resp.Events {
 				s.handleWatchEvent(event)
 			}
@@ -499,6 +571,17 @@ func (s *etcdStorage) CreateUser(ctx context.Context, user *types.User) error {
 		return fmt.Errorf("user already exists")
 	}
 
+	// Check for duplicate username
+	existing, _ := s.GetUserByUsername(ctx, user.Username)
+	if existing != nil {
+		return fmt.Errorf("username already exists")
+	}
+
+	// Set timestamps
+	now := time.Now()
+	user.CreatedAt = now
+	user.UpdatedAt = now
+
 	// Marshal user
 	data, err := json.Marshal(user)
 	if err != nil {
@@ -524,6 +607,15 @@ func (s *etcdStorage) UpdateUser(ctx context.Context, user *types.User) error {
 	if len(resp.Kvs) == 0 {
 		return fmt.Errorf("user not found")
 	}
+
+	// Preserve created timestamp
+	var existing types.User
+	if err := json.Unmarshal(resp.Kvs[0].Value, &existing); err == nil {
+		user.CreatedAt = existing.CreatedAt
+	}
+
+	// Update timestamp
+	user.UpdatedAt = time.Now()
 
 	// Marshal user
 	data, err := json.Marshal(user)
@@ -620,6 +712,15 @@ func (s *etcdStorage) CreateAPIKey(ctx context.Context, apiKey *types.APIKey) er
 	if len(resp.Kvs) > 0 {
 		return fmt.Errorf("API key already exists")
 	}
+
+	// Validate user exists
+	if _, err := s.GetUser(ctx, apiKey.UserID); err != nil {
+		return fmt.Errorf("user %s not found", apiKey.UserID)
+	}
+
+	// Set timestamp
+	now := time.Now()
+	apiKey.CreatedAt = now
 
 	// Marshal API key
 	data, err := json.Marshal(apiKey)

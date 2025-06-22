@@ -86,6 +86,19 @@ func (rr *roundRobin) Remove(serverID string) error {
 
 // UpdateWeight updates server weight (no-op for round-robin)
 func (rr *roundRobin) UpdateWeight(serverID string, weight int) error {
-	// Round-robin doesn't use weights
+	// Validate weight even though round-robin doesn't use it
+	if weight < 0 {
+		return types.ErrInvalidWeight
+	}
+	
+	rr.mu.RLock()
+	_, exists := rr.servers[serverID]
+	rr.mu.RUnlock()
+	
+	if !exists {
+		return types.ErrServerNotFound
+	}
+	
+	// Round-robin doesn't use weights, but we validated the input
 	return nil
 }

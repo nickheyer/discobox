@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	
 	"net/http"
 	
@@ -16,11 +17,14 @@ import (
 
 // router implements the Router interface
 type router struct {
-	storage  types.Storage
-	logger   types.Logger
-	mu       sync.RWMutex
-	routes   []*types.Route
-	compiled map[string]*compiledRoute
+	storage    types.Storage
+	logger     types.Logger
+	mu         sync.RWMutex
+	routes     []*types.Route
+	compiled   map[string]*compiledRoute
+	hostRouter *hostRouter // Optimization for host-based lookups
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
 // compiledRoute holds pre-compiled regex patterns
@@ -32,10 +36,12 @@ type compiledRoute struct {
 // NewRouter creates a new router instance
 func NewRouter(storage types.Storage, logger types.Logger) types.Router {
 	r := &router{
-		storage:  storage,
-		logger:   logger,
-		routes:   make([]*types.Route, 0),
-		compiled: make(map[string]*compiledRoute),
+		storage:    storage,
+		logger:     logger,
+		routes:     make([]*types.Route, 0),
+		compiled:   make(map[string]*compiledRoute),
+		hostRouter: newHostRouter(),
+		stopCh:     make(chan struct{}),
 	}
 	
 	// Load initial routes
@@ -44,8 +50,20 @@ func NewRouter(storage types.Storage, logger types.Logger) types.Router {
 		logger.Error("failed to load initial routes", "error", err)
 	}
 	
-	// Watch for route changes
-	go r.watchChanges(ctx)
+	// Watch for route changes in a separate goroutine
+	// This ensures the router is fully initialized before starting the watch
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		// Small delay to ensure storage watch is ready
+		// This prevents race conditions during initialization
+		select {
+		case <-time.After(10 * time.Millisecond):
+		case <-r.stopCh:
+			return
+		}
+		r.watchChanges()
+	}()
 	
 	return r
 }
@@ -55,13 +73,20 @@ func (r *router) Match(req *http.Request) (*types.Route, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	
-	// Routes are already sorted by priority
-	for _, compiled := range r.routes {
-		route := compiled
+	// Use host router to get candidate routes
+	candidates := r.hostRouter.findRoutes(req.Host)
+	
+	// If no candidates based on host, no match possible
+	if len(candidates) == 0 {
+		return nil, types.ErrRouteNotFound
+	}
+	
+	// Routes are already sorted by priority in the candidates list
+	for _, route := range candidates {
 		compiledRoute := r.compiled[route.ID]
 		
-		// Match host
-		if route.Host != "" && !r.matchHost(req.Host, route.Host) {
+		// Skip routes with invalid regex (not in compiled map)
+		if route.PathRegex != "" && compiledRoute == nil {
 			continue
 		}
 		
@@ -71,7 +96,7 @@ func (r *router) Match(req *http.Request) (*types.Route, error) {
 		}
 		
 		// Match path regex
-		if route.PathRegex != "" && compiledRoute.pathRegexp != nil {
+		if route.PathRegex != "" && compiledRoute != nil && compiledRoute.pathRegexp != nil {
 			if !compiledRoute.pathRegexp.MatchString(req.URL.Path) {
 				continue
 			}
@@ -183,9 +208,16 @@ func (r *router) loadRoutes(ctx context.Context) error {
 		compiled[route.ID] = cr
 	}
 	
+	// Clear and rebuild host router
+	newHostRouter := newHostRouter()
+	for _, route := range routes {
+		newHostRouter.addRoute(route)
+	}
+	
 	r.mu.Lock()
 	r.routes = routes
 	r.compiled = compiled
+	r.hostRouter = newHostRouter
 	r.mu.Unlock()
 	
 	r.logger.Info("loaded routes", "count", len(routes))
@@ -193,46 +225,44 @@ func (r *router) loadRoutes(ctx context.Context) error {
 }
 
 // watchChanges watches for route changes in storage
-func (r *router) watchChanges(ctx context.Context) {
+func (r *router) watchChanges() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	// Cancel watch context when stopCh is closed
+	go func() {
+		<-r.stopCh
+		cancel()
+	}()
+	
 	events := r.storage.Watch(ctx)
 	
-	for event := range events {
-		if event.Kind != "route" {
-			continue
-		}
-		
-		r.logger.Debug("route change detected",
-			"type", event.Type,
-			"id", event.ID,
-		)
-		
-		// Reload routes on any change
-		if err := r.loadRoutes(ctx); err != nil {
-			r.logger.Error("failed to reload routes", "error", err)
+	for {
+		select {
+		case <-r.stopCh:
+			return
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if event.Kind != "route" && event.Kind != "service" {
+				continue
+			}
+			
+			r.logger.Debug("storage change detected",
+				"type", event.Type,
+				"kind", event.Kind,
+				"id", event.ID,
+			)
+			
+			// Reload routes on any change
+			if err := r.loadRoutes(context.Background()); err != nil {
+				r.logger.Error("failed to reload routes", "error", err)
+			}
 		}
 	}
 }
 
-// matchHost checks if the request host matches the route host
-func (r *router) matchHost(reqHost, routeHost string) bool {
-	// Remove port from request host
-	if idx := strings.LastIndex(reqHost, ":"); idx != -1 {
-		reqHost = reqHost[:idx]
-	}
-	
-	// Exact match
-	if reqHost == routeHost {
-		return true
-	}
-	
-	// Wildcard match (*.example.com)
-	if strings.HasPrefix(routeHost, "*.") {
-		suffix := routeHost[1:] // Remove *
-		return strings.HasSuffix(reqHost, suffix)
-	}
-	
-	return false
-}
 
 // matchHeaders checks if request headers match route requirements
 func (r *router) matchHeaders(req *http.Request, routeHeaders map[string]string) bool {
@@ -248,4 +278,11 @@ func (r *router) matchHeaders(req *http.Request, routeHeaders map[string]string)
 	}
 	
 	return true
+}
+
+// Close stops the router and waits for goroutines to finish
+func (r *router) Close() error {
+	close(r.stopCh)
+	r.wg.Wait()
+	return nil
 }

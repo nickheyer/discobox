@@ -3,8 +3,6 @@ package router
 import (
 	"strings"
 	"sync"
-	
-	"net/http"
 
 	"discobox/internal/types"
 )
@@ -74,80 +72,9 @@ func (h *hostRouter) findRoutes(host string) []*types.Route {
 	// Add routes without host constraints
 	routes = append(routes, h.allRoutes...)
 	
+	// Note: Routes are already sorted by priority when they were added
+	// The router maintains the priority order when loading from storage
 	return routes
 }
 
-// clear removes all routes
-func (h *hostRouter) clear() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	
-	h.exactHosts = make(map[string][]*types.Route)
-	h.wildcards = make(map[string][]*types.Route)
-	h.allRoutes = make([]*types.Route, 0)
-}
 
-// HostBasedRouter wraps the main router with host-based optimization
-type HostBasedRouter struct {
-	types.Router
-	hostRouter *hostRouter
-	mu         sync.RWMutex
-}
-
-// NewHostBasedRouter creates a router optimized for host-based routing
-func NewHostBasedRouter(baseRouter types.Router) *HostBasedRouter {
-	return &HostBasedRouter{
-		Router:     baseRouter,
-		hostRouter: newHostRouter(),
-	}
-}
-
-// Match finds the best route for a request using host-based optimization
-func (r *HostBasedRouter) Match(req *http.Request) (*types.Route, error) {
-	// Get potential routes based on host
-	candidates := r.hostRouter.findRoutes(req.Host)
-	
-	if len(candidates) == 0 {
-		return nil, types.ErrRouteNotFound
-	}
-	
-	// If only one candidate, check if it matches other criteria
-	if len(candidates) == 1 {
-		route := candidates[0]
-		if r.matchesPath(req, route) && r.matchesHeaders(req, route) {
-			return route, nil
-		}
-		return nil, types.ErrRouteNotFound
-	}
-	
-	// Multiple candidates - fall back to base router
-	return r.Router.Match(req)
-}
-
-// matchesPath checks if request path matches route requirements
-func (r *HostBasedRouter) matchesPath(req *http.Request, route *types.Route) bool {
-	// Check path prefix
-	if route.PathPrefix != "" && !strings.HasPrefix(req.URL.Path, route.PathPrefix) {
-		return false
-	}
-	
-	// Path regex matching would require compilation, so we skip it here
-	// and let the base router handle it
-	
-	return true
-}
-
-// matchesHeaders checks if request headers match route requirements
-func (r *HostBasedRouter) matchesHeaders(req *http.Request, route *types.Route) bool {
-	if len(route.Headers) == 0 {
-		return true
-	}
-	
-	for key, value := range route.Headers {
-		if req.Header.Get(key) != value {
-			return false
-		}
-	}
-	
-	return true
-}

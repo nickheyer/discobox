@@ -12,23 +12,34 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// limiterEntry wraps a rate limiter with last access time
+type limiterEntry struct {
+	limiter    *rate.Limiter
+	lastAccess time.Time
+	mu         sync.Mutex
+}
+
 // rateLimiter implements rate limiting middleware
 type rateLimiter struct {
-	limiters map[string]*rate.Limiter
+	limiters map[string]*limiterEntry
 	mu       sync.RWMutex
 	rps      int
 	burst    int
 	byHeader string
 	keyFunc  func(*http.Request) string
+	ttl      time.Duration // Time-to-live for idle limiters
+	stopCh   chan struct{}
 }
 
 // RateLimit creates rate limiting middleware
 func RateLimit(config types.ProxyConfig) types.Middleware {
 	rl := &rateLimiter{
-		limiters: make(map[string]*rate.Limiter),
+		limiters: make(map[string]*limiterEntry),
 		rps:      config.RateLimit.RPS,
 		burst:    config.RateLimit.Burst,
 		byHeader: config.RateLimit.ByHeader,
+		ttl:      5 * time.Minute, // Default TTL for idle limiters
+		stopCh:   make(chan struct{}),
 	}
 	
 	// Set key function based on configuration
@@ -69,41 +80,89 @@ func (rl *rateLimiter) Middleware(next http.Handler) http.Handler {
 // getLimiter returns a limiter for the given key
 func (rl *rateLimiter) getLimiter(key string) *rate.Limiter {
 	rl.mu.RLock()
-	limiter, exists := rl.limiters[key]
+	entry, exists := rl.limiters[key]
 	rl.mu.RUnlock()
 	
 	if exists {
-		return limiter
+		// Update last access time
+		entry.mu.Lock()
+		entry.lastAccess = time.Now()
+		entry.mu.Unlock()
+		return entry.limiter
 	}
 	
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	
 	// Double-check
-	if limiter, exists := rl.limiters[key]; exists {
-		return limiter
+	if entry, exists := rl.limiters[key]; exists {
+		entry.mu.Lock()
+		entry.lastAccess = time.Now()
+		entry.mu.Unlock()
+		return entry.limiter
 	}
 	
-	limiter = rate.NewLimiter(rate.Limit(rl.rps), rl.burst)
-	rl.limiters[key] = limiter
+	// Create new limiter entry
+	entry = &limiterEntry{
+		limiter:    rate.NewLimiter(rate.Limit(rl.rps), rl.burst),
+		lastAccess: time.Now(),
+	}
+	rl.limiters[key] = entry
 	
-	return limiter
+	return entry.limiter
 }
 
 // cleanup periodically removes unused limiters
 func (rl *rateLimiter) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute) // Check every minute
 	defer ticker.Stop()
 	
-	for range ticker.C {
+	for {
+		select {
+		case <-ticker.C:
+			rl.cleanupStale()
+		case <-rl.stopCh:
+			return
+		}
+	}
+}
+
+// cleanupStale removes limiters that haven't been accessed recently
+func (rl *rateLimiter) cleanupStale() {
+	now := time.Now()
+	expiredKeys := make([]string, 0)
+	
+	// First pass: identify expired entries
+	rl.mu.RLock()
+	for key, entry := range rl.limiters {
+		entry.mu.Lock()
+		if now.Sub(entry.lastAccess) > rl.ttl {
+			expiredKeys = append(expiredKeys, key)
+		}
+		entry.mu.Unlock()
+	}
+	rl.mu.RUnlock()
+	
+	// Second pass: remove expired entries
+	if len(expiredKeys) > 0 {
 		rl.mu.Lock()
-		// In production, track last used time and remove old entries
-		// For now, clear if map gets too large
-		if len(rl.limiters) > 10000 {
-			rl.limiters = make(map[string]*rate.Limiter)
+		for _, key := range expiredKeys {
+			// Double-check the entry is still expired
+			if entry, exists := rl.limiters[key]; exists {
+				entry.mu.Lock()
+				if now.Sub(entry.lastAccess) > rl.ttl {
+					delete(rl.limiters, key)
+				}
+				entry.mu.Unlock()
+			}
 		}
 		rl.mu.Unlock()
 	}
+}
+
+// Stop stops the cleanup goroutine
+func (rl *rateLimiter) Stop() {
+	close(rl.stopCh)
 }
 
 // getClientIP extracts client IP from request
@@ -192,19 +251,25 @@ type TokenBucketRateLimiter struct {
 }
 
 type tokenBucket struct {
-	tokens    int
-	lastCheck time.Time
-	mu        sync.Mutex
+	tokens     int
+	lastCheck  time.Time
+	lastAccess time.Time
+	mu         sync.Mutex
 }
 
 // NewTokenBucketRateLimiter creates a token bucket rate limiter
 func NewTokenBucketRateLimiter(capacity, refillRate int, interval time.Duration) types.RateLimiter {
-	return &TokenBucketRateLimiter{
+	tb := &TokenBucketRateLimiter{
 		buckets:  make(map[string]*tokenBucket),
 		capacity: capacity,
 		refill:   refillRate,
 		interval: interval,
 	}
+	
+	// Start cleanup goroutine for token buckets
+	go tb.cleanup()
+	
+	return tb
 }
 
 // Allow checks if a request should be allowed
@@ -214,8 +279,11 @@ func (t *TokenBucketRateLimiter) Allow(key string) bool {
 	bucket.mu.Lock()
 	defer bucket.mu.Unlock()
 	
-	// Refill tokens
+	// Update last access time
 	now := time.Now()
+	bucket.lastAccess = now
+	
+	// Refill tokens
 	elapsed := now.Sub(bucket.lastCheck)
 	tokensToAdd := int(elapsed / t.interval) * t.refill
 	
@@ -273,13 +341,55 @@ func (t *TokenBucketRateLimiter) getBucket(key string) *tokenBucket {
 		return bucket
 	}
 	
+	now := time.Now()
 	bucket = &tokenBucket{
-		tokens:    t.capacity,
-		lastCheck: time.Now(),
+		tokens:     t.capacity,
+		lastCheck:  now,
+		lastAccess: now,
 	}
 	t.buckets[key] = bucket
 	
 	return bucket
+}
+
+// cleanup periodically removes unused token buckets
+func (t *TokenBucketRateLimiter) cleanup() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	
+	ttl := 5 * time.Minute // Remove buckets idle for 5 minutes
+	
+	for range ticker.C {
+		now := time.Now()
+		expiredKeys := make([]string, 0)
+		
+		// First pass: identify expired buckets
+		t.mu.RLock()
+		for key, bucket := range t.buckets {
+			bucket.mu.Lock()
+			if now.Sub(bucket.lastAccess) > ttl {
+				expiredKeys = append(expiredKeys, key)
+			}
+			bucket.mu.Unlock()
+		}
+		t.mu.RUnlock()
+		
+		// Second pass: remove expired buckets
+		if len(expiredKeys) > 0 {
+			t.mu.Lock()
+			for _, key := range expiredKeys {
+				// Double-check the bucket is still expired
+				if bucket, exists := t.buckets[key]; exists {
+					bucket.mu.Lock()
+					if now.Sub(bucket.lastAccess) > ttl {
+						delete(t.buckets, key)
+					}
+					bucket.mu.Unlock()
+				}
+			}
+			t.mu.Unlock()
+		}
+	}
 }
 
 func min(a, b int) int {

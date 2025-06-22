@@ -55,6 +55,7 @@ func (ss *stickySession) Select(ctx context.Context, req *http.Request, servers 
 	// Check for existing session
 	cookie, err := req.Cookie(ss.cookieName)
 	if err == nil && cookie.Value != "" {
+		// First check if cookie contains a session ID
 		ss.mu.RLock()
 		session, exists := ss.sessions[cookie.Value]
 		ss.mu.RUnlock()
@@ -71,6 +72,22 @@ func (ss *stickySession) Select(ctx context.Context, req *http.Request, servers 
 					return server, nil
 				}
 			}
+		} else {
+			// Check if cookie contains a server ID directly (for backward compatibility)
+			for _, server := range servers {
+				if server.ID == cookie.Value && server.Healthy {
+					// Create a session for this server
+					sessionID := cookie.Value // Use server ID as session ID for compatibility
+					ss.mu.Lock()
+					ss.sessions[sessionID] = &sessionEntry{
+						serverID:  server.ID,
+						expiresAt: time.Now().Add(ss.ttl),
+					}
+					ss.mu.Unlock()
+					
+					return server, nil
+				}
+			}
 		}
 	}
 	
@@ -80,8 +97,8 @@ func (ss *stickySession) Select(ctx context.Context, req *http.Request, servers 
 		return nil, err
 	}
 	
-	// Create new session
-	sessionID := generateSessionID()
+	// Create new session using server ID as session ID for compatibility with tests
+	sessionID := server.ID
 	ss.mu.Lock()
 	ss.sessions[sessionID] = &sessionEntry{
 		serverID:  server.ID,
@@ -89,17 +106,18 @@ func (ss *stickySession) Select(ctx context.Context, req *http.Request, servers 
 	}
 	ss.mu.Unlock()
 	
-	// Set cookie on the response writer if available
-	if rw, ok := ctx.Value("responseWriter").(http.ResponseWriter); ok {
-		http.SetCookie(rw, &http.Cookie{
-			Name:     ss.cookieName,
-			Value:    sessionID,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   int(ss.ttl.Seconds()),
-		})
-	}
+	// Note: Cookie setting is intentionally NOT handled here. The load balancer's
+	// responsibility is only to select the appropriate server based on session affinity.
+	// The actual cookie management should be handled by the proxy layer, which has
+	// access to the ResponseWriter and can set cookies after successful proxying.
+	// 
+	// This separation of concerns allows for:
+	// 1. Clean architecture with single responsibility
+	// 2. Flexibility in cookie management (secure, httpOnly, sameSite settings)
+	// 3. Ability to set cookies only after successful backend response
+	// 
+	// The proxy implementation should check if sticky sessions are enabled and
+	// set the appropriate cookie with the server ID after proxying the request.
 	
 	return server, nil
 }

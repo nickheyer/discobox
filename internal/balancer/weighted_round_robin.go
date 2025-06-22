@@ -99,13 +99,20 @@ func (wrr *weightedRoundRobin) Remove(serverID string) error {
 
 // UpdateWeight updates server weight
 func (wrr *weightedRoundRobin) UpdateWeight(serverID string, weight int) error {
+	if weight < 0 {
+		return types.ErrInvalidWeight
+	}
+	
 	wrr.mu.Lock()
 	defer wrr.mu.Unlock()
 	
-	if server, exists := wrr.servers[serverID]; exists {
-		server.Weight = weight
-		wrr.weightedServers = nil // Force rebuild on next select
+	server, exists := wrr.servers[serverID]
+	if !exists {
+		return types.ErrServerNotFound
 	}
+	
+	server.Weight = weight
+	wrr.weightedServers = nil // Force rebuild on next select
 	
 	return nil
 }
@@ -271,16 +278,23 @@ func (swrr *smoothWeightedRoundRobin) Remove(serverID string) error {
 
 // UpdateWeight updates server weight
 func (swrr *smoothWeightedRoundRobin) UpdateWeight(serverID string, weight int) error {
+	if weight < 0 {
+		return types.ErrInvalidWeight
+	}
+	
 	swrr.mu.Lock()
 	defer swrr.mu.Unlock()
 	
-	if ws, exists := swrr.servers[serverID]; exists {
-		if weight <= 0 {
-			weight = 1
-		}
-		ws.effectiveWeight = weight
-		ws.Server.Weight = weight
+	ws, exists := swrr.servers[serverID]
+	if !exists {
+		return types.ErrServerNotFound
 	}
+	
+	if weight <= 0 {
+		weight = 1
+	}
+	ws.effectiveWeight = weight
+	ws.Server.Weight = weight
 	
 	return nil
 }

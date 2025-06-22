@@ -341,12 +341,44 @@ func (s *sqliteStorage) DeleteService(ctx context.Context, id string) error {
 		return err
 	}
 
+	// Get all routes that reference this service for deletion events
+	routesToDelete, err := s.db.QueryContext(ctx, "SELECT id FROM routes WHERE service_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to query routes: %w", err)
+	}
+	defer routesToDelete.Close()
+
+	var routeIDs []string
+	for routesToDelete.Next() {
+		var routeID string
+		if err := routesToDelete.Scan(&routeID); err != nil {
+			return fmt.Errorf("failed to scan route ID: %w", err)
+		}
+		routeIDs = append(routeIDs, routeID)
+	}
+
+	// Delete routes that reference this service
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM routes WHERE service_id = ?", id); err != nil {
+		return fmt.Errorf("failed to delete routes: %w", err)
+	}
+
+	// Delete the service
 	_, err = s.db.ExecContext(ctx, "DELETE FROM services WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete service: %w", err)
 	}
 
-	// Notify watchers
+	// Notify watchers about route deletions
+	for _, routeID := range routeIDs {
+		s.notifyWatchers(types.StorageEvent{
+			Type:   "deleted",
+			Kind:   "route",
+			ID:     routeID,
+			Object: nil, // We don't have the route object anymore
+		})
+	}
+
+	// Notify watchers about service deletion
 	s.notifyWatchers(types.StorageEvent{
 		Type:   "deleted",
 		Kind:   "service",
@@ -778,7 +810,7 @@ func (s *sqliteStorage) UpdateUser(ctx context.Context, user *types.User) error 
 	          updated_at = CURRENT_TIMESTAMP, metadata = ?
 	          WHERE id = ?`
 
-	_, err = s.db.ExecContext(ctx, query,
+	result, err := s.db.ExecContext(ctx, query,
 		user.Username, user.PasswordHash, user.Email,
 		user.IsAdmin, user.MustChangePassword, user.Active,
 		string(metadata), user.ID,
@@ -788,11 +820,37 @@ func (s *sqliteStorage) UpdateUser(ctx context.Context, user *types.User) error 
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("user not found")
+	}
+
 	return nil
 }
 
 func (s *sqliteStorage) DeleteUser(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
+	// Check if user exists
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE id = ?", id).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %w", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	// Delete API keys first (cascade deletion)
+	_, err = s.db.ExecContext(ctx, "DELETE FROM api_keys WHERE user_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete API keys: %w", err)
+	}
+
+	// Delete the user
+	_, err = s.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
@@ -892,6 +950,16 @@ func (s *sqliteStorage) CreateAPIKey(ctx context.Context, apiKey *types.APIKey) 
 		return types.ErrInvalidRequest
 	}
 
+	// Check if user exists
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE id = ?", apiKey.UserID).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check user existence: %w", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("user not found")
+	}
+
 	metadata, err := json.Marshal(apiKey.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -918,10 +986,20 @@ func (s *sqliteStorage) CreateAPIKey(ctx context.Context, apiKey *types.APIKey) 
 }
 
 func (s *sqliteStorage) RevokeAPIKey(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE api_keys SET active = FALSE WHERE key = ?", key)
+	result, err := s.db.ExecContext(ctx, "UPDATE api_keys SET active = FALSE WHERE key = ?", key)
 	if err != nil {
 		return fmt.Errorf("failed to revoke API key: %w", err)
 	}
+	
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	
+	if rowsAffected == 0 {
+		return fmt.Errorf("API key not found")
+	}
+	
 	return nil
 }
 

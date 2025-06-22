@@ -137,6 +137,26 @@ func (m *memoryStorage) DeleteService(ctx context.Context, id string) error {
 		return types.ErrServiceNotFound
 	}
 	
+	// Delete all routes that reference this service
+	routesToDelete := []string{}
+	for routeID, route := range m.routes {
+		if route.ServiceID == id {
+			routesToDelete = append(routesToDelete, routeID)
+		}
+	}
+	
+	for _, routeID := range routesToDelete {
+		route := m.routes[routeID]
+		delete(m.routes, routeID)
+		// Notify watchers about route deletion
+		m.notifyWatchers(types.StorageEvent{
+			Type:   "deleted",
+			Kind:   "route",
+			ID:     routeID,
+			Object: route,
+		})
+	}
+	
 	delete(m.services, id)
 	
 	// Notify watchers

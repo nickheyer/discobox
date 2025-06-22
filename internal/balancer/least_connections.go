@@ -13,6 +13,7 @@ import (
 type leastConnections struct {
 	mu      sync.RWMutex
 	servers map[string]*types.Server
+	counter uint64 // For round-robin when connections are equal
 }
 
 // NewLeastConnections creates a new least connections load balancer
@@ -28,8 +29,9 @@ func (lc *leastConnections) Select(ctx context.Context, req *http.Request, serve
 		return nil, types.ErrNoHealthyBackends
 	}
 	
-	var selected *types.Server
+	// First pass: find minimum connections and collect eligible servers
 	minConnections := int64(math.MaxInt64)
+	var eligibleServers []*types.Server
 	
 	for _, server := range servers {
 		// Skip unhealthy servers
@@ -44,23 +46,30 @@ func (lc *leastConnections) Select(ctx context.Context, req *http.Request, serve
 			continue
 		}
 		
-		// Select server with least connections
+		// Track minimum connections
 		if activeConns < minConnections {
 			minConnections = activeConns
-			selected = server
-		} else if activeConns == minConnections && selected != nil {
-			// If connections are equal, prefer server with higher weight
-			if server.Weight > selected.Weight {
-				selected = server
-			}
+			eligibleServers = []*types.Server{server}
+		} else if activeConns == minConnections {
+			eligibleServers = append(eligibleServers, server)
 		}
 	}
 	
-	if selected == nil {
+	if len(eligibleServers) == 0 {
 		return nil, types.ErrNoHealthyBackends
 	}
 	
-	return selected, nil
+	// If only one server has minimum connections, return it
+	if len(eligibleServers) == 1 {
+		return eligibleServers[0], nil
+	}
+	
+	// Multiple servers have equal minimum connections
+	// Use round-robin to distribute load fairly
+	count := atomic.AddUint64(&lc.counter, 1)
+	index := (count - 1) % uint64(len(eligibleServers))
+	
+	return eligibleServers[index], nil
 }
 
 // Add adds a new server to the pool
@@ -87,12 +96,19 @@ func (lc *leastConnections) Remove(serverID string) error {
 
 // UpdateWeight updates server weight
 func (lc *leastConnections) UpdateWeight(serverID string, weight int) error {
+	if weight < 0 {
+		return types.ErrInvalidWeight
+	}
+	
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	
-	if server, exists := lc.servers[serverID]; exists {
-		server.Weight = weight
+	server, exists := lc.servers[serverID]
+	if !exists {
+		return types.ErrServerNotFound
 	}
+	
+	server.Weight = weight
 	
 	return nil
 }
@@ -178,12 +194,19 @@ func (wlc *weightedLeastConnections) Remove(serverID string) error {
 
 // UpdateWeight updates server weight
 func (wlc *weightedLeastConnections) UpdateWeight(serverID string, weight int) error {
+	if weight < 0 {
+		return types.ErrInvalidWeight
+	}
+	
 	wlc.mu.Lock()
 	defer wlc.mu.Unlock()
 	
-	if server, exists := wlc.servers[serverID]; exists {
-		server.Weight = weight
+	server, exists := wlc.servers[serverID]
+	if !exists {
+		return types.ErrServerNotFound
 	}
+	
+	server.Weight = weight
 	
 	return nil
 }

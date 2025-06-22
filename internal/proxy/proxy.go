@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -87,7 +88,9 @@ func New(opts Options) *Proxy {
 	}
 
 	if p.errorHandler == nil {
-		p.errorHandler = p.defaultErrorHandler
+		p.errorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			p.defaultErrorHandler(w, r, err, http.StatusBadGateway)
+		}
 	}
 
 	return p
@@ -180,6 +183,35 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // createReverseProxy creates a reverse proxy for a specific backend
 func (p *Proxy) createReverseProxy(server *types.Server, service *types.Service, route *types.Route) *httputil.ReverseProxy {
+	// Create error handler that records failures
+	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
+		if p.healthChecker != nil {
+			p.healthChecker.RecordFailure(server.ID, err)
+		}
+		if p.errorHandler != nil {
+			p.errorHandler(w, r, err)
+		} else {
+			p.defaultErrorHandler(w, r, err, http.StatusBadGateway)
+		}
+	}
+	
+	// Create response modifier that records success
+	modifyResponse := func(resp *http.Response) error {
+		// Record success for 2xx and 3xx responses
+		if p.healthChecker != nil && resp.StatusCode < 400 {
+			p.healthChecker.RecordSuccess(server.ID)
+		} else if p.healthChecker != nil && resp.StatusCode >= 500 {
+			// Record failure for 5xx responses
+			p.healthChecker.RecordFailure(server.ID, fmt.Errorf("backend returned %d", resp.StatusCode))
+		}
+		
+		// Call the original modifier if present
+		if p.modifyResponse != nil {
+			return p.modifyResponse(resp)
+		}
+		return nil
+	}
+	
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = server.URL.Scheme
@@ -196,13 +228,10 @@ func (p *Proxy) createReverseProxy(server *types.Server, service *types.Service,
 			}
 		},
 		Transport:      p.transport,
-		ErrorHandler:   p.errorHandler,
-		ModifyResponse: p.modifyResponse,
+		ErrorHandler:   errorHandler,
+		ModifyResponse: modifyResponse,
 		BufferPool:     p.bufferPool,
 	}
-
-	// Set timeout via context or transport
-	// httputil.ReverseProxy doesn't have a Timeout field
 
 	return proxy
 }
@@ -296,24 +325,29 @@ func (p *Proxy) handleError(w http.ResponseWriter, r *http.Request, err error, s
 		return
 	}
 
-	p.defaultErrorHandler(w, r, err)
+	p.defaultErrorHandler(w, r, err, statusCode)
 }
 
 // defaultErrorHandler is the default error handler
-func (p *Proxy) defaultErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	statusCode := http.StatusBadGateway
-
+func (p *Proxy) defaultErrorHandler(w http.ResponseWriter, r *http.Request, err error, suggestedStatus int) {
+	statusCode := suggestedStatus
+	
+	// Override with specific error codes if we recognize the error
 	switch {
-	case err == types.ErrRouteNotFound:
+	case errors.Is(err, types.ErrRouteNotFound):
 		statusCode = http.StatusNotFound
-	case err == types.ErrNoHealthyBackends:
+	case errors.Is(err, types.ErrNoHealthyBackends):
 		statusCode = http.StatusServiceUnavailable
-	case err == types.ErrCircuitBreakerOpen:
+	case errors.Is(err, types.ErrCircuitBreakerOpen):
 		statusCode = http.StatusServiceUnavailable
-	case err == types.ErrRateLimitExceeded:
+	case errors.Is(err, types.ErrRateLimitExceeded):
 		statusCode = http.StatusTooManyRequests
-	case err == types.ErrTimeout:
+	case errors.Is(err, types.ErrTimeout):
 		statusCode = http.StatusGatewayTimeout
+	case errors.Is(err, types.ErrServiceNotFound):
+		statusCode = http.StatusServiceUnavailable
+	case strings.Contains(err.Error(), "is not active"):
+		statusCode = http.StatusServiceUnavailable
 	}
 
 	http.Error(w, err.Error(), statusCode)
