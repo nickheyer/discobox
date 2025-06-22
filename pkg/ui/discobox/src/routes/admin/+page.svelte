@@ -132,7 +132,7 @@
 {#if $isAuthenticated && $isAdmin}
 	<Navbar />
 	
-	<div class="container mx-auto p-4">
+	<div class="container mx-auto p-4 max-w-7xl">
 		<div class="flex justify-between items-center mb-6">
 			<h1 class="text-3xl font-bold">Admin Configuration</h1>
 			<button 
@@ -156,40 +156,48 @@
 				<!-- Current Configuration -->
 				<div class="card bg-base-200">
 					<div class="card-body">
-						<h2 class="card-title">Current Configuration</h2>
-						<div class="grid gap-4 md:grid-cols-2">
+						<h2 class="card-title mb-4">Current Configuration</h2>
+						<div class="grid gap-6 lg:grid-cols-2">
 							<div>
-								<h3 class="font-semibold mb-2">Server</h3>
-								<div class="space-y-1 text-sm">
-									<div class="flex justify-between">
-										<span class="text-base-content/70">Listen Address</span>
-										<span class="font-mono">{config.listen_addr}</span>
+								<h3 class="font-semibold mb-3 text-sm uppercase text-base-content/70">Server Settings</h3>
+								<div class="space-y-2">
+									<div class="flex justify-between items-center py-1 border-b border-base-300">
+										<span class="text-sm">Listen Address</span>
+										<span class="font-mono text-sm">{config.listen_addr}</span>
 									</div>
-									<div class="flex justify-between">
-										<span class="text-base-content/70">TLS Enabled</span>
-										<span>{config.tls?.enabled ? 'Yes' : 'No'}</span>
+									<div class="flex justify-between items-center py-1 border-b border-base-300">
+										<span class="text-sm">TLS Enabled</span>
+										<span class="badge badge-sm" class:badge-success={config.tls?.enabled} class:badge-ghost={!config.tls?.enabled}>
+											{config.tls?.enabled ? 'Yes' : 'No'}
+										</span>
 									</div>
-									<div class="flex justify-between">
-										<span class="text-base-content/70">HTTP/2 Enabled</span>
-										<span>{config.http2?.enabled ? 'Yes' : 'No'}</span>
+									<div class="flex justify-between items-center py-1 border-b border-base-300">
+										<span class="text-sm">HTTP/2 Enabled</span>
+										<span class="badge badge-sm" class:badge-success={config.http2?.enabled} class:badge-ghost={!config.http2?.enabled}>
+											{config.http2?.enabled ? 'Yes' : 'No'}
+										</span>
 									</div>
 								</div>
 							</div>
 							
 							<div>
-								<h3 class="font-semibold mb-2">Features</h3>
-								<div class="space-y-1 text-sm">
-									<div class="flex justify-between">
-										<span class="text-base-content/70">Load Balancing</span>
-										<span class="font-mono">{config.load_balancing?.algorithm}</span>
+								<h3 class="font-semibold mb-3 text-sm uppercase text-base-content/70">Features</h3>
+								<div class="space-y-2">
+									<div class="flex justify-between items-center py-1 border-b border-base-300">
+										<span class="text-sm">Load Balancing</span>
+										<span class="badge badge-sm badge-primary">{config.load_balancing?.algorithm}</span>
 									</div>
-									<div class="flex justify-between">
-										<span class="text-base-content/70">Sticky Sessions</span>
-										<span>{config.load_balancing?.sticky?.enabled ? 'Enabled' : 'Disabled'}</span>
+									<div class="flex justify-between items-center py-1 border-b border-base-300">
+										<span class="text-sm">Sticky Sessions</span>
+										<span class="badge badge-sm" class:badge-success={config.load_balancing?.sticky?.enabled} class:badge-ghost={!config.load_balancing?.sticky?.enabled}>
+											{config.load_balancing?.sticky?.enabled ? 'Enabled' : 'Disabled'}
+										</span>
 									</div>
-									<div class="flex justify-between">
-										<span class="text-base-content/70">Rate Limiting</span>
-										<span>{config.rate_limit?.enabled ? 'Enabled' : 'Disabled'}</span>
+									<div class="flex justify-between items-center py-1 border-b border-base-300">
+										<span class="text-sm">Rate Limiting</span>
+										<span class="badge badge-sm" class:badge-success={config.rate_limit?.enabled} class:badge-ghost={!config.rate_limit?.enabled}>
+											{config.rate_limit?.enabled ? 'Enabled' : 'Disabled'}
+										</span>
 									</div>
 								</div>
 							</div>

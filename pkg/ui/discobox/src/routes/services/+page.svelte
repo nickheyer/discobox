@@ -4,11 +4,12 @@
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import type { Service } from '$lib/types';
 	
-	let services = $state<any[]>([]);
+	let services = $state<Service[]>([]);
 	let loading = $state(true);
 	let showModal = $state(false);
-	let editingService = $state<any>(null);
+	let editingService = $state<Service | null>(null);
 	let formData = $state({
 		id: '',
 		name: '',
@@ -38,7 +39,7 @@
 		}
 	}
 	
-	function openModal(service?: any) {
+	function openModal(service?: Service) {
 		if (service) {
 			editingService = service;
 			formData = {
@@ -110,7 +111,7 @@
 {#if $isAuthenticated}
 	<Navbar />
 	
-	<div class="container mx-auto p-4">
+	<div class="container mx-auto p-4 max-w-7xl">
 		<div class="flex justify-between items-center mb-6">
 			<h1 class="text-3xl font-bold">Services</h1>
 			<button class="btn btn-primary" onclick={() => openModal()}>
@@ -128,7 +129,7 @@
 		{:else}
 			<div class="grid gap-4">
 				{#each services as service}
-					<div class="card bg-base-200 shadow-xl">
+					<div class="card bg-base-200 shadow-sm hover:shadow-md transition-shadow duration-200">
 						<div class="card-body">
 							<div class="flex justify-between items-start">
 								<div>
@@ -142,39 +143,41 @@
 								</div>
 							</div>
 							
-							<div class="grid gap-2 mt-4">
+							<div class="grid gap-4 mt-4">
 								<div>
-									<span class="font-semibold">Endpoints:</span>
-									<ul class="list-disc list-inside ml-4">
+									<p class="font-semibold mb-2">Endpoints:</p>
+									<div class="space-y-1">
 										{#each service.endpoints || [] as endpoint}
-											<li class="font-mono text-sm">{endpoint}</li>
+											<div class="badge badge-outline badge-sm font-mono max-w-full">
+												<span class="truncate" title={endpoint}>{endpoint}</span>
+											</div>
 										{/each}
-									</ul>
+									</div>
 								</div>
 								
-								<div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-									<div>
-										<span class="text-base-content/70">Health Path:</span>
-										<span class="font-mono ml-2">{service.health_path}</span>
+								<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+									<div class="space-y-1">
+										<p class="text-xs text-base-content/60 uppercase tracking-wider">Health Path</p>
+										<p class="font-mono">{service.health_path}</p>
 									</div>
-									<div>
-										<span class="text-base-content/70">Weight:</span>
-										<span class="font-mono ml-2">{service.weight}</span>
+									<div class="space-y-1">
+										<p class="text-xs text-base-content/60 uppercase tracking-wider">Weight</p>
+										<p class="font-mono">{service.weight}</p>
 									</div>
-									<div>
-										<span class="text-base-content/70">Timeout:</span>
-										<span class="font-mono ml-2">{service.timeout}</span>
+									<div class="space-y-1">
+										<p class="text-xs text-base-content/60 uppercase tracking-wider">Timeout</p>
+										<p class="font-mono">{service.timeout}</p>
 									</div>
-									<div>
-										<span class="text-base-content/70">Max Conns:</span>
-										<span class="font-mono ml-2">{service.max_conns || 'Unlimited'}</span>
+									<div class="space-y-1">
+										<p class="text-xs text-base-content/60 uppercase tracking-wider">Max Connections</p>
+										<p class="font-mono">{service.max_conns || 'Unlimited'}</p>
 									</div>
 								</div>
 							</div>
 							
 							<div class="card-actions justify-end mt-4">
-								<button class="btn btn-sm" onclick={() => openModal(service)}>Edit</button>
-								<button class="btn btn-sm btn-error" onclick={() => deleteService(service.id)}>Delete</button>
+								<button class="btn btn-sm btn-ghost" onclick={() => openModal(service)}>Edit</button>
+								<button class="btn btn-sm btn-ghost btn-error" onclick={() => deleteService(service.id)}>Delete</button>
 							</div>
 						</div>
 					</div>
@@ -192,17 +195,18 @@
 	
 	<!-- Modal -->
 	<dialog class="modal" class:modal-open={showModal}>
-		<div class="modal-box max-w-2xl">
+		<div class="modal-box max-w-2xl max-h-[90vh] overflow-y-auto">
 			<h3 class="font-bold text-lg mb-4">
 				{editingService ? 'Edit Service' : 'Add Service'}
 			</h3>
 			
 			<div class="space-y-4">
 				<div class="form-control">
-					<label class="label">
+					<label class="label" for="service-id">
 						<span class="label-text">Service ID</span>
 					</label>
 					<input
+						id="service-id"
 						type="text"
 						class="input input-bordered"
 						bind:value={formData.id}
@@ -212,10 +216,11 @@
 				</div>
 				
 				<div class="form-control">
-					<label class="label">
+					<label class="label" for="service-name">
 						<span class="label-text">Name</span>
 					</label>
 					<input
+						id="service-name"
 						type="text"
 						class="input input-bordered"
 						bind:value={formData.name}
@@ -224,11 +229,11 @@
 				</div>
 				
 				<div class="form-control">
-					<label class="label">
+					<div class="label">
 						<span class="label-text">Endpoints</span>
-					</label>
+					</div>
 					{#each formData.endpoints as endpoint, i}
-						<div class="input-group mb-2">
+						<div class="flex gap-2 mb-2">
 							<input
 								type="text"
 								class="input input-bordered flex-1"
@@ -239,6 +244,7 @@
 								class="btn btn-square btn-error"
 								onclick={() => removeEndpoint(i)}
 								disabled={formData.endpoints.length === 1}
+								aria-label="Remove endpoint"
 							>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -246,17 +252,21 @@
 							</button>
 						</div>
 					{/each}
-					<button class="btn btn-sm btn-ghost" onclick={addEndpoint}>
+					<button class="btn btn-sm btn-ghost gap-2" onclick={addEndpoint}>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+						</svg>
 						Add Endpoint
 					</button>
 				</div>
 				
 				<div class="grid grid-cols-2 gap-4">
 					<div class="form-control">
-						<label class="label">
+						<label class="label" for="health-path">
 							<span class="label-text">Health Path</span>
 						</label>
 						<input
+							id="health-path"
 							type="text"
 							class="input input-bordered"
 							bind:value={formData.health_path}
@@ -265,10 +275,11 @@
 					</div>
 					
 					<div class="form-control">
-						<label class="label">
+						<label class="label" for="service-weight">
 							<span class="label-text">Weight</span>
 						</label>
 						<input
+							id="service-weight"
 							type="number"
 							class="input input-bordered"
 							bind:value={formData.weight}
@@ -278,10 +289,11 @@
 				</div>
 				
 				<div class="form-control">
-					<label class="label">
+					<label class="label" for="service-timeout">
 						<span class="label-text">Timeout</span>
 					</label>
 					<input
+						id="service-timeout"
 						type="text"
 						class="input input-bordered"
 						bind:value={formData.timeout}

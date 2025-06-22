@@ -1,7 +1,13 @@
 @import 'tailwindcss';
 
 /* Plugins and configuration */
+@plugin "@tailwindcss/forms";
 @plugin "@tailwindcss/typography";
-@plugin "daisyui" {
-	themes: all;
+@plugin "daisyui";
+
+/* Custom utilities */
+@layer utilities {
+	.text-balance {
+		text-wrap: balance;
+	}
 }

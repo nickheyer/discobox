@@ -23,6 +23,7 @@ GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GORUN=$(GOCMD) run
+GOGEN=$(GOCMD) generate
 GOFMT=gofmt
 GOLINT=golangci-lint
 GOVET=$(GOCMD) vet
@@ -61,12 +62,16 @@ build-all: clean
 	@echo "Multi-platform build complete"
 
 # Run the application
-run: build
+run: gen build
 	@echo "Running $(BINARY_NAME)..."
 	$(BUILD_DIR)/$(BINARY_NAME) -config configs/discobox.yml
 
+gen:
+	@echo "Generating/building svelte ui for $(BINARY_NAME)..."
+	$(GOGEN) pkg/ui/discobox/ui.go
+
 # Development mode with hot reload
-dev: clean
+dev: gen clean
 	@echo "Running in development mode with hot reload..."
 	$(GORUN) $(MAIN_PATH)
 #	@which air > /dev/null || go install github.com/air-verse/air@latest

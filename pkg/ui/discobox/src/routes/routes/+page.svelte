@@ -4,12 +4,13 @@
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import type { Route, Service } from '$lib/types';
 	
-	let routes = $state<any[]>([]);
-	let services = $state<any[]>([]);
+	let routes = $state<Route[]>([]);
+	let services = $state<Service[]>([]);
 	let loading = $state(true);
 	let showModal = $state(false);
-	let editingRoute = $state<any>(null);
+	let editingRoute = $state<Route | null>(null);
 	let formData = $state({
 		id: '',
 		priority: 100,
@@ -56,13 +57,19 @@
 		}
 	}
 	
-	function openModal(route?: any) {
+	function openModal(route?: Route) {
 		if (route) {
 			editingRoute = route;
+			// Deep clone to avoid mutation
 			formData = {
-				...route,
-				headers: { ...(route.headers || {}) },
-				middlewares: [...(route.middlewares || [])]
+				id: route.id,
+				priority: route.priority,
+				host: route.host || '',
+				path_prefix: route.path_prefix || '',
+				path_regex: route.path_regex || '',
+				headers: route.headers ? { ...route.headers } : {},
+				service_id: route.service_id || '',
+				middlewares: route.middlewares ? [...route.middlewares] : []
 			};
 		} else {
 			editingRoute = null;
@@ -87,12 +94,21 @@
 	
 	async function saveRoute() {
 		try {
-			const data = { ...formData };
-			// Remove empty values
-			if (!data.host) delete data.host;
-			if (!data.path_prefix) delete data.path_prefix;
-			if (!data.path_regex) delete data.path_regex;
-			if (Object.keys(data.headers).length === 0) delete data.headers;
+			// Build data object with only defined values
+			const data: any = {
+				id: formData.id,
+				priority: formData.priority,
+				service_id: formData.service_id,
+				middlewares: formData.middlewares
+			};
+			
+			// Add optional fields only if they have values
+			if (formData.host) data.host = formData.host;
+			if (formData.path_prefix) data.path_prefix = formData.path_prefix;
+			if (formData.path_regex) data.path_regex = formData.path_regex;
+			if (Object.keys(formData.headers).length > 0) {
+				data.headers = formData.headers;
+			}
 			
 			if (editingRoute) {
 				await api.updateRoute(editingRoute.id, data);
@@ -132,7 +148,7 @@
 {#if $isAuthenticated}
 	<Navbar />
 	
-	<div class="container mx-auto p-4">
+	<div class="container mx-auto p-4 max-w-7xl">
 		<div class="flex justify-between items-center mb-6">
 			<h1 class="text-3xl font-bold">Routes</h1>
 			<button class="btn btn-primary" onclick={() => openModal()}>
@@ -148,56 +164,68 @@
 				<span class="loading loading-spinner loading-lg"></span>
 			</div>
 		{:else}
-			<div class="overflow-x-auto">
-				<table class="table">
+			<div class="card bg-base-200 shadow-sm">
+				<div class="card-body p-0">
+				<div class="overflow-x-auto">
+					<table class="table table-zebra w-full">
 					<thead>
 						<tr>
-							<th>Priority</th>
-							<th>Host</th>
-							<th>Path</th>
-							<th>Service</th>
-							<th>Middlewares</th>
-							<th>Actions</th>
+							<th class="w-20">Priority</th>
+							<th class="min-w-[150px]">Host</th>
+							<th class="min-w-[200px]">Path</th>
+							<th class="min-w-[150px]">Service</th>
+							<th class="min-w-[200px]">Middlewares</th>
+							<th class="w-32">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
-						{#each routes.sort((a, b) => b.priority - a.priority) as route}
-							<tr>
+						{#each [...routes].sort((a, b) => b.priority - a.priority) as route}
+							<tr class="hover">
 								<td>
-									<span class="badge badge-primary">{route.priority}</span>
-								</td>
-								<td class="font-mono text-sm">
-									{route.host || '*'}
-								</td>
-								<td class="font-mono text-sm">
-									{#if route.path_prefix}
-										<span class="text-info">prefix:</span> {route.path_prefix}
-									{:else if route.path_regex}
-										<span class="text-warning">regex:</span> {route.path_regex}
-									{:else}
-										*
-									{/if}
+									<span class="badge badge-primary badge-sm">{route.priority}</span>
 								</td>
 								<td>
-									{services.find(s => s.id === route.service_id)?.name || route.service_id}
+									<span class="font-mono text-xs block truncate max-w-[150px]" title={route.host || '*'}>
+										{route.host || '*'}
+									</span>
 								</td>
 								<td>
-									<div class="flex flex-wrap gap-1">
+									<span class="font-mono text-xs">
+										{#if route.path_prefix}
+											<span class="text-info">prefix:</span>
+											<span class="block truncate max-w-[200px]" title={route.path_prefix}>{route.path_prefix}</span>
+										{:else if route.path_regex}
+											<span class="text-warning">regex:</span>
+											<span class="block truncate max-w-[200px]" title={route.path_regex}>{route.path_regex}</span>
+										{:else}
+											<span class="text-base-content/50">*</span>
+										{/if}
+									</span>
+								</td>
+								<td>
+									<span class="text-sm block truncate max-w-[150px]" title={services.find(s => s.id === route.service_id)?.name || route.service_id}>
+										{services.find(s => s.id === route.service_id)?.name || route.service_id}
+									</span>
+								</td>
+								<td>
+									<div class="flex flex-wrap gap-1 max-w-[200px]">
 										{#each route.middlewares || [] as mw}
-											<span class="badge badge-sm">{mw}</span>
+											<span class="badge badge-ghost badge-xs">{mw}</span>
 										{/each}
 									</div>
 								</td>
 								<td>
-									<div class="flex gap-2">
-										<button class="btn btn-xs" onclick={() => openModal(route)}>Edit</button>
-										<button class="btn btn-xs btn-error" onclick={() => deleteRoute(route.id)}>Delete</button>
+									<div class="flex gap-1">
+										<button class="btn btn-xs btn-ghost" onclick={() => openModal(route)}>Edit</button>
+										<button class="btn btn-xs btn-ghost btn-error" onclick={() => deleteRoute(route.id)}>Delete</button>
 									</div>
 								</td>
 							</tr>
 						{/each}
 					</tbody>
-				</table>
+					</table>
+				</div>
+				</div>
 				
 				{#if routes.length === 0}
 					<div class="text-center py-12">
@@ -211,7 +239,7 @@
 	
 	<!-- Modal -->
 	<dialog class="modal" class:modal-open={showModal}>
-		<div class="modal-box max-w-2xl">
+		<div class="modal-box max-w-2xl max-h-[90vh] overflow-y-auto">
 			<h3 class="font-bold text-lg mb-4">
 				{editingRoute ? 'Edit Route' : 'Add Route'}
 			</h3>
@@ -305,19 +333,19 @@
 				</div>
 				
 				<div class="form-control">
-					<label class="label">
+					<div class="label">
 						<span class="label-text">Middlewares</span>
-					</label>
-					<div class="flex flex-wrap gap-2">
+					</div>
+					<div class="grid grid-cols-2 gap-2">
 						{#each availableMiddlewares as mw}
-							<label class="label cursor-pointer gap-2">
+							<label class="label cursor-pointer justify-start gap-2 p-2 rounded hover:bg-base-300">
 								<input
 									type="checkbox"
 									class="checkbox checkbox-sm"
 									checked={formData.middlewares.includes(mw)}
 									onchange={() => toggleMiddleware(mw)}
 								/>
-								<span class="label-text">{mw}</span>
+								<span class="label-text text-sm">{mw}</span>
 							</label>
 						{/each}
 					</div>

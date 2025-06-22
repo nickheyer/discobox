@@ -1,5 +1,7 @@
 import { browser } from '$app/environment';
 
+import type { Service, Route, Metrics, Health } from '$lib/types';
+
 class ApiClient {
 	private baseUrl = '/api/v1';
 	
@@ -8,11 +10,9 @@ class ApiClient {
 			'Content-Type': 'application/json'
 		};
 		
-		if (browser) {
-			const apiKey = localStorage.getItem('apiKey');
-			if (apiKey) {
-				headers['X-API-Key'] = apiKey;
-			}
+		const apiKey = localStorage.getItem('apiKey');
+		if (apiKey) {
+			headers['X-API-Key'] = apiKey;
 		}
 		
 		return headers;
@@ -37,71 +37,71 @@ class ApiClient {
 	
 	// Services
 	async getServices() {
-		return this.request<any[]>('/services');
+		return this.request<Service[]>('/services');
 	}
 	
 	async getService(id: string) {
-		return this.request<any>(`/services/${id}`);
+		return this.request<Service>(`/services/${id}`);
 	}
 	
-	async createService(service: any) {
-		return this.request('/services', {
+	async createService(service: Partial<Service>) {
+		return this.request<Service>('/services', {
 			method: 'POST',
 			body: JSON.stringify(service)
 		});
 	}
 	
-	async updateService(id: string, service: any) {
-		return this.request(`/services/${id}`, {
+	async updateService(id: string, service: Partial<Service>) {
+		return this.request<Service>(`/services/${id}`, {
 			method: 'PUT',
 			body: JSON.stringify(service)
 		});
 	}
 	
 	async deleteService(id: string) {
-		return this.request(`/services/${id}`, {
+		return this.request<void>(`/services/${id}`, {
 			method: 'DELETE'
 		});
 	}
 	
 	// Routes
 	async getRoutes() {
-		return this.request<any[]>('/routes');
+		return this.request<Route[]>('/routes');
 	}
 	
 	async getRoute(id: string) {
-		return this.request<any>(`/routes/${id}`);
+		return this.request<Route>(`/routes/${id}`);
 	}
 	
-	async createRoute(route: any) {
-		return this.request('/routes', {
+	async createRoute(route: Partial<Route>) {
+		return this.request<Route>('/routes', {
 			method: 'POST',
 			body: JSON.stringify(route)
 		});
 	}
 	
-	async updateRoute(id: string, route: any) {
-		return this.request(`/routes/${id}`, {
+	async updateRoute(id: string, route: Partial<Route>) {
+		return this.request<Route>(`/routes/${id}`, {
 			method: 'PUT',
 			body: JSON.stringify(route)
 		});
 	}
 	
 	async deleteRoute(id: string) {
-		return this.request(`/routes/${id}`, {
+		return this.request<void>(`/routes/${id}`, {
 			method: 'DELETE'
 		});
 	}
 	
 	// Metrics
 	async getMetrics() {
-		return this.request<any>('/metrics');
+		return this.request<Metrics>('/metrics');
 	}
 	
 	// Health
 	async getHealth() {
 		const res = await fetch('/health');
-		return res.json();
+		return res.json() as Promise<Health>;
 	}
 }
 

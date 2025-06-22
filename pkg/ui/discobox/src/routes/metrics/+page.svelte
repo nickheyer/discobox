@@ -4,10 +4,11 @@
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import type { Metrics } from '$lib/types';
 	
-	let metrics = $state<any>(null);
+	let metrics = $state<Metrics | null>(null);
 	let loading = $state(true);
-	let interval = $state(5000);
+	let interval: number | null = null;
 	
 	onMount(async () => {
 		if (!$isAuthenticated) {
@@ -45,7 +46,7 @@
 {#if $isAuthenticated}
 	<Navbar />
 	
-	<div class="container mx-auto p-4">
+	<div class="container mx-auto p-4 max-w-7xl">
 		<h1 class="text-3xl font-bold mb-6">Metrics</h1>
 		
 		{#if loading}
@@ -54,20 +55,20 @@
 			</div>
 		{:else if metrics}
 			<!-- Overview Stats -->
-			<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-8">
-				<div class="stat bg-base-200 rounded-box">
+			<div class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+				<div class="stat bg-base-200 rounded-box shadow-sm hover:shadow-md transition-shadow duration-200">
 					<div class="stat-title">Uptime</div>
 					<div class="stat-value text-primary">{metrics.uptime || '0s'}</div>
 					<div class="stat-desc">System running time</div>
 				</div>
 				
-				<div class="stat bg-base-200 rounded-box">
+				<div class="stat bg-base-200 rounded-box shadow-sm hover:shadow-md transition-shadow duration-200">
 					<div class="stat-title">Total Requests</div>
 					<div class="stat-value text-secondary">{formatNumber(metrics.requests?.total || 0)}</div>
 					<div class="stat-desc">{metrics.requests?.per_second || 0} req/s</div>
 				</div>
 				
-				<div class="stat bg-base-200 rounded-box">
+				<div class="stat bg-base-200 rounded-box shadow-sm hover:shadow-md transition-shadow duration-200">
 					<div class="stat-title">Error Rate</div>
 					<div class="stat-value" class:text-error={metrics.requests?.error_rate > 0.05}>
 						{((metrics.requests?.error_rate || 0) * 100).toFixed(2)}%
@@ -75,7 +76,7 @@
 					<div class="stat-desc">{metrics.requests?.errors || 0} total errors</div>
 				</div>
 				
-				<div class="stat bg-base-200 rounded-box">
+				<div class="stat bg-base-200 rounded-box shadow-sm hover:shadow-md transition-shadow duration-200">
 					<div class="stat-title">Active Connections</div>
 					<div class="stat-value text-info">{metrics.system?.connections || 0}</div>
 					<div class="stat-desc">Current connections</div>
@@ -83,7 +84,7 @@
 			</div>
 			
 			<!-- Latency Stats -->
-			<div class="card bg-base-200 mb-6">
+			<div class="card bg-base-200 shadow-sm hover:shadow-md transition-shadow duration-200 mb-6">
 				<div class="card-body">
 					<h2 class="card-title">Latency Distribution</h2>
 					<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -109,7 +110,7 @@
 			
 			<!-- System Resources -->
 			<div class="grid gap-4 lg:grid-cols-2">
-				<div class="card bg-base-200">
+				<div class="card bg-base-200 shadow-sm hover:shadow-md transition-shadow duration-200">
 					<div class="card-body">
 						<h2 class="card-title">System Resources</h2>
 						<div class="space-y-4">
@@ -151,7 +152,7 @@
 				</div>
 				
 				<!-- Per-Service Metrics -->
-				<div class="card bg-base-200">
+				<div class="card bg-base-200 shadow-sm hover:shadow-md transition-shadow duration-200">
 					<div class="card-body">
 						<h2 class="card-title">Service Performance</h2>
 						<div class="overflow-x-auto">
@@ -192,8 +193,9 @@
 			</div>
 			
 			<!-- Auto-refresh indicator -->
-			<div class="text-center mt-4 text-sm text-base-content/50">
-				Auto-refreshing every 5 seconds
+			<div class="flex items-center justify-center gap-2 mt-6 text-sm text-base-content/60">
+				<span class="loading loading-spinner loading-xs"></span>
+				<span>Auto-refreshing every 5 seconds</span>
 			</div>
 		{/if}
 	</div>

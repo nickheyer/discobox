@@ -1,12 +1,5 @@
 import { writable, derived } from 'svelte/store';
-
-interface User {
-	id: string;
-	username: string;
-	email: string;
-	is_admin: boolean;
-	active: boolean;
-}
+import type { User } from '$lib/types';
 
 interface AuthState {
 	user: User | null;
