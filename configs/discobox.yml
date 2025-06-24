@@ -148,7 +148,7 @@ logging:
 # Metrics configuration
 metrics:
   enabled: true
-  path: "/metrics"
+  path: "/prometheus/metrics"
 
 # Storage backend configuration
 storage:

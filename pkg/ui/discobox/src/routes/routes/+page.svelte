@@ -41,18 +41,20 @@
 	
 	async function loadRoutes() {
 		try {
-			routes = await api.getRoutes();
+			routes = await api.getRoutes() || [];
 		} catch (error) {
 			console.error('Failed to load routes:', error);
+			routes = [];
 		}
 	}
 	
 	async function loadServices() {
 		try {
-			services = await api.getServices();
+			services = await api.getServices() || [];
 			loading = false;
 		} catch (error) {
 			console.error('Failed to load services:', error);
+			services = [];
 			loading = false;
 		}
 	}
@@ -120,19 +122,16 @@
 			closeModal();
 		} catch (error) {
 			console.error('Failed to save route:', error);
-			alert('Failed to save route');
+			console.error('Failed to save route:', error);
 		}
 	}
 	
 	async function deleteRoute(id: string) {
-		if (!confirm('Are you sure you want to delete this route?')) return;
-		
 		try {
 			await api.deleteRoute(id);
 			await loadRoutes();
 		} catch (error) {
 			console.error('Failed to delete route:', error);
-			alert('Failed to delete route');
 		}
 	}
 	
@@ -179,7 +178,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each [...routes].sort((a, b) => b.priority - a.priority) as route}
+						{#each [...(routes || [])].sort((a, b) => b.priority - a.priority) as route}
 							<tr class="hover">
 								<td>
 									<span class="badge badge-primary badge-sm">{route.priority}</span>
@@ -227,7 +226,7 @@
 				</div>
 				</div>
 				
-				{#if routes.length === 0}
+				{#if !routes || routes.length === 0}
 					<div class="text-center py-12">
 						<p class="text-base-content/70 mb-4">No routes configured yet.</p>
 						<button class="btn btn-primary" onclick={() => openModal()}>Add Your First Route</button>

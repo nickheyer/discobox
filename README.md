@@ -46,9 +46,9 @@ make docker-build
 make docker-run
 
 # Access the services
-# Web UI: http://localhost:8080
-# Admin API: http://localhost:8081
-# Metrics: http://localhost:9090/metrics
+# Proxy: http://localhost:8080 (for your backend services)
+# Web UI & Admin API: http://localhost:8081
+# Prometheus Metrics: http://localhost:8081/prometheus/metrics
 ```
 
 ### Building from Source

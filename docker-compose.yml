@@ -18,7 +18,7 @@ services:
       # Admin API port
       - "8081:8081"
       # Metrics port
-      - "9090:9090"
+      - "8081:8081"
     environment:
       # Override configuration via environment variables
       - DISCOBOX_LOG_LEVEL=${LOG_LEVEL:-info}

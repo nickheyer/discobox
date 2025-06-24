@@ -32,6 +32,11 @@ class ApiClient {
 			throw new Error(error || `HTTP ${res.status}`);
 		}
 		
+		// Handle 204 No Content
+		if (res.status === 204) {
+			return null as T;
+		}
+		
 		return res.json();
 	}
 	
@@ -95,7 +100,7 @@ class ApiClient {
 	
 	// Metrics
 	async getMetrics() {
-		return this.request<Metrics>('/metrics');
+		return this.request<Metrics>('/stats');
 	}
 	
 	// Health

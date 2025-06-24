@@ -14,6 +14,7 @@ import (
 	discobox_ui "discobox/pkg/ui/discobox"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,7 +24,6 @@ import (
 	"syscall"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
@@ -105,18 +105,7 @@ func main() {
 		}()
 	}
 
-	// Metrics server
-	if cfg.Metrics.Enabled {
-		go func() {
-			metricsAddr := ":9090" // Default metrics port
-			logger.Info("Starting metrics server", "addr", metricsAddr)
-			mux := http.NewServeMux()
-			mux.Handle(cfg.Metrics.Path, promhttp.Handler())
-			if err := http.ListenAndServe(metricsAddr, mux); err != nil {
-				errChan <- fmt.Errorf("metrics server error: %w", err)
-			}
-		}()
-	}
+	// Metrics server is now served on the API port, so we don't need a separate server
 
 	// Wait for shutdown signal or error
 	select {
@@ -215,20 +204,10 @@ func initializeApp(cfg *types.ProxyConfig, logger types.Logger, loader *config.L
 	// Build middleware chain
 	proxyHandler := buildMiddlewareChain(cfg, reverseProxy, logger)
 
-	// Create combined handler with UI fallback if enabled
-	var handler http.Handler = proxyHandler
-	if cfg.UI.Enabled {
-		handler = &uiProxyHandler{
-			proxy:  proxyHandler,
-			ui:     http.FileServer(discobox_ui.GetFileSystem()),
-			uiPath: cfg.UI.Path,
-		}
-	}
-
-	// Initialize proxy server
+	// Initialize proxy server (NO UI HERE - just proxy)
 	proxyServer := &http.Server{
 		Addr:         cfg.ListenAddr,
-		Handler:      handler,
+		Handler:      proxyHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -238,12 +217,39 @@ func initializeApp(cfg *types.ProxyConfig, logger types.Logger, loader *config.L
 	var apiServer *http.Server
 	if cfg.API.Enabled {
 		apiHandler := api.New(store, logger, cfg)
-		apiServer = &http.Server{
-			Addr:         cfg.API.Addr,
-			Handler:      apiHandler.Router(),
-			ReadTimeout:  cfg.ReadTimeout,
-			WriteTimeout: cfg.WriteTimeout,
-			IdleTimeout:  cfg.IdleTimeout,
+
+		// Create router for API server
+		apiRouter := apiHandler.Router()
+
+		// Add UI to API server if enabled
+		if cfg.UI.Enabled {
+			// Mount UI at root on the API server
+			uiHandler := &spaHandler{
+				fs: discobox_ui.GetFileSystem(),
+			}
+
+			// Create a new mux that combines API and UI
+			combinedMux := http.NewServeMux()
+			combinedMux.Handle("/api/", apiRouter)
+			combinedMux.Handle("/health", apiRouter)
+			combinedMux.Handle("/prometheus/metrics", apiRouter)
+			combinedMux.Handle("/", uiHandler)
+
+			apiServer = &http.Server{
+				Addr:         cfg.API.Addr,
+				Handler:      combinedMux,
+				ReadTimeout:  cfg.ReadTimeout,
+				WriteTimeout: cfg.WriteTimeout,
+				IdleTimeout:  cfg.IdleTimeout,
+			}
+		} else {
+			apiServer = &http.Server{
+				Addr:         cfg.API.Addr,
+				Handler:      apiRouter,
+				ReadTimeout:  cfg.ReadTimeout,
+				WriteTimeout: cfg.WriteTimeout,
+				IdleTimeout:  cfg.IdleTimeout,
+			}
 		}
 	}
 
@@ -487,5 +493,67 @@ func (rw *interceptResponseWriter) flush() {
 	}
 	if len(rw.body) > 0 {
 		rw.ResponseWriter.Write(rw.body)
+	}
+}
+
+// spaHandler serves the SPA UI, returning index.html for non-existent paths
+type spaHandler struct {
+	fs http.FileSystem
+}
+
+func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Try to open the requested file
+	path := r.URL.Path
+	if path == "/" {
+		path = "/index.html"
+	}
+	
+	file, err := h.fs.Open(path)
+	if err != nil {
+		// If file doesn't exist, serve index.html for client-side routing
+		file, err = h.fs.Open("/index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			return
+		}
+		// Set path back to "/" so http.ServeContent doesn't get confused
+		r.URL.Path = "/"
+	}
+	defer file.Close()
+	
+	// Get file info
+	stat, err := file.Stat()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	
+	// Serve the file
+	if stat.IsDir() {
+		// If it's a directory, try index.html
+		indexFile, err := h.fs.Open(path + "/index.html")
+		if err != nil {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+		defer indexFile.Close()
+		
+		indexStat, err := indexFile.Stat()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		if seeker, ok := indexFile.(io.ReadSeeker); ok {
+			http.ServeContent(w, r, path+"/index.html", indexStat.ModTime(), seeker)
+		} else {
+			http.Error(w, "File not seekable", http.StatusInternalServerError)
+		}
+	} else {
+		if seeker, ok := file.(io.ReadSeeker); ok {
+			http.ServeContent(w, r, path, stat.ModTime(), seeker)
+		} else {
+			http.Error(w, "File not seekable", http.StatusInternalServerError)
+		}
 	}
 }

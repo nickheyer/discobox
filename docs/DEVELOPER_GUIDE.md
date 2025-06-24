@@ -115,7 +115,7 @@ Public packages that could theoretically be imported:
 4. **Zero-Copy**: Use io.CopyBuffer where possible
 
 ### Monitoring
-- Prometheus metrics on :9090
+- Prometheus metrics on :8081
 - Custom dashboards for all key metrics
 - Alerts for circuit breaker trips and high error rates
 

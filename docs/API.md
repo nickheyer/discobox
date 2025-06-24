@@ -534,7 +534,7 @@ Health status of a specific service.
 **Response (200 OK):** Service health object (same structure as in list)
 
 ### GET /api/metrics
-Aggregated metrics (Prometheus format also available at :9090/metrics).
+Aggregated metrics (Prometheus format also available at :8081/metrics).
 
 **Query Parameters:**
 - `period` (string, optional): Time period (1h, 24h, 7d, 30d)

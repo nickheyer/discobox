@@ -14,6 +14,7 @@ import (
 	"net/http"
 	
 	"discobox/internal/metrics"
+	"discobox/internal/middleware"
 	"discobox/internal/types"
 	"discobox/internal/version"
 )
@@ -60,6 +61,11 @@ func (h *Handler) Router() http.Handler {
 	publicRouter.HandleFunc("/health", h.handleHealth).Methods("GET")
 	publicRouter.HandleFunc("/api/v1/auth/login", h.handleLogin).Methods("POST", "OPTIONS")
 	
+	// Prometheus metrics endpoint (no auth, no JSON middleware)
+	if h.config.Metrics.Enabled {
+		mainRouter.Handle(h.config.Metrics.Path, middleware.MetricsHandler()).Methods("GET")
+	}
+	
 	// Apply only CORS and logging middleware to public routes
 	publicRouter.Use(func(next http.Handler) http.Handler {
 		return corsMiddleware(jsonMiddleware(loggingMiddleware(next, h.logger)))
@@ -82,8 +88,8 @@ func (h *Handler) Router() http.Handler {
 	apiRouter.HandleFunc("/routes/{id}", h.handleUpdateRoute).Methods("PUT", "OPTIONS")
 	apiRouter.HandleFunc("/routes/{id}", h.handleDeleteRoute).Methods("DELETE", "OPTIONS")
 	
-	// Metrics
-	apiRouter.HandleFunc("/metrics", h.handleMetrics).Methods("GET", "OPTIONS")
+	// Metrics (JSON format for UI)
+	apiRouter.HandleFunc("/stats", h.handleMetrics).Methods("GET", "OPTIONS")
 	
 	// Users
 	apiRouter.HandleFunc("/users", h.handleListUsers).Methods("GET", "OPTIONS")
@@ -189,61 +195,46 @@ func (h *Handler) handleListServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	respondJSON(w, http.StatusOK, services)
+	respondJSON(w, http.StatusOK, servicesToResponse(services))
 }
 
 // handleCreateService handles POST /api/v1/services
 func (h *Handler) handleCreateService(w http.ResponseWriter, r *http.Request) {
-	var service types.Service
-	if err := json.NewDecoder(r.Body).Decode(&service); err != nil {
+	var req ServiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	
-	// Validate service
-	if service.Name == "" {
-		respondError(w, http.StatusBadRequest, "Service name is required")
-		return
-	}
-	
-	if len(service.Endpoints) == 0 {
-		respondError(w, http.StatusBadRequest, "At least one endpoint is required")
+	// Validate request
+	if err := validateServiceRequest(&req); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	
 	// Generate ID if not provided
-	if service.ID == "" {
-		service.ID = uuid.New().String()
+	if req.ID == "" {
+		req.ID = uuid.New().String()
 	}
 	
-	// Set defaults
-	if service.HealthPath == "" {
-		service.HealthPath = "/"
+	// Parse service request
+	service, err := parseServiceRequest(&req, nil)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	
-	if service.Weight == 0 {
-		service.Weight = 1
-	}
-	
-	if service.Timeout == 0 {
-		service.Timeout = 30 * time.Second
-	}
-	
-	// Set timestamps
-	service.CreatedAt = time.Now()
-	service.UpdatedAt = time.Now()
-	service.Active = true
 	
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	
-	if err := h.storage.CreateService(ctx, &service); err != nil {
+	if err := h.storage.CreateService(ctx, service); err != nil {
 		h.logger.Error("failed to create service", "error", err)
 		respondError(w, http.StatusInternalServerError, "Failed to create service")
 		return
 	}
 	
-	respondJSON(w, http.StatusCreated, service)
+	response := serviceToResponse(service)
+	respondJSON(w, http.StatusCreated, response)
 }
 
 // handleGetService handles GET /api/v1/services/{id}
@@ -261,7 +252,8 @@ func (h *Handler) handleGetService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	respondJSON(w, http.StatusOK, service)
+	response := serviceToResponse(service)
+	respondJSON(w, http.StatusOK, response)
 }
 
 // handleUpdateService handles PUT /api/v1/services/{id}
@@ -269,45 +261,46 @@ func (h *Handler) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 	
-	var service types.Service
-	if err := json.NewDecoder(r.Body).Decode(&service); err != nil {
+	var req ServiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	
-	// Ensure ID matches URL
-	service.ID = id
-	
-	// Validate service
-	if service.Name == "" {
-		respondError(w, http.StatusBadRequest, "Service name is required")
-		return
-	}
-	
-	if len(service.Endpoints) == 0 {
-		respondError(w, http.StatusBadRequest, "At least one endpoint is required")
+	// Validate request
+	if err := validateServiceRequest(&req); err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	
-	// Check if service exists
-	if _, err := h.storage.GetService(ctx, id); err != nil {
+	// Get existing service
+	existingService, err := h.storage.GetService(ctx, id)
+	if err != nil {
 		respondError(w, http.StatusNotFound, "Service not found")
 		return
 	}
 	
-	// Update timestamp
-	service.UpdatedAt = time.Now()
+	// Set ID from URL to ensure it's not changed
+	req.ID = id
 	
-	if err := h.storage.UpdateService(ctx, &service); err != nil {
+	// Parse service request with existing service for timestamp preservation
+	service, err := parseServiceRequest(&req, existingService)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	
+	if err := h.storage.UpdateService(ctx, service); err != nil {
 		h.logger.Error("failed to update service", "error", err, "id", id)
 		respondError(w, http.StatusInternalServerError, "Failed to update service")
 		return
 	}
 	
-	respondJSON(w, http.StatusOK, service)
+	response := serviceToResponse(service)
+	respondJSON(w, http.StatusOK, response)
 }
 
 // handleDeleteService handles DELETE /api/v1/services/{id}
@@ -362,15 +355,47 @@ func (h *Handler) handleListRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	respondJSON(w, http.StatusOK, routes)
+	respondJSON(w, http.StatusOK, routesToResponse(routes))
 }
 
 // handleCreateRoute handles POST /api/v1/routes
 func (h *Handler) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
-	var route types.Route
-	if err := json.NewDecoder(r.Body).Decode(&route); err != nil {
+	var req RouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
+	}
+	
+	// Convert request to route
+	route := types.Route{
+		ID:          req.ID,
+		Priority:    req.Priority,
+		Host:        req.Host,
+		PathPrefix:  req.PathPrefix,
+		PathRegex:   req.PathRegex,
+		Headers:     req.Headers,
+		ServiceID:   req.ServiceID,
+		Middlewares: req.Middlewares,
+	}
+	
+	// Convert metadata
+	if req.Metadata != nil {
+		route.Metadata = make(map[string]interface{})
+		for k, v := range req.Metadata {
+			route.Metadata[k] = v
+		}
+	}
+	
+	// Convert rewrite rules
+	if len(req.RewriteRules) > 0 {
+		route.RewriteRules = make([]types.RewriteRule, len(req.RewriteRules))
+		for i, rule := range req.RewriteRules {
+			route.RewriteRules[i] = types.RewriteRule{
+				Type:        rule.Type,
+				Pattern:     rule.Pattern,
+				Replacement: rule.Replacement,
+			}
+		}
 	}
 	
 	// Validate route
@@ -404,7 +429,8 @@ func (h *Handler) handleCreateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	respondJSON(w, http.StatusCreated, route)
+	response := routeToResponse(&route)
+	respondJSON(w, http.StatusCreated, response)
 }
 
 // handleGetRoute handles GET /api/v1/routes/{id}
@@ -422,7 +448,8 @@ func (h *Handler) handleGetRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	respondJSON(w, http.StatusOK, route)
+	response := routeToResponse(route)
+	respondJSON(w, http.StatusOK, response)
 }
 
 // handleUpdateRoute handles PUT /api/v1/routes/{id}
@@ -430,14 +457,43 @@ func (h *Handler) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 	
-	var route types.Route
-	if err := json.NewDecoder(r.Body).Decode(&route); err != nil {
+	var req RouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	
-	// Ensure ID matches URL
-	route.ID = id
+	// Convert request to route
+	route := types.Route{
+		ID:          id, // Use ID from URL
+		Priority:    req.Priority,
+		Host:        req.Host,
+		PathPrefix:  req.PathPrefix,
+		PathRegex:   req.PathRegex,
+		Headers:     req.Headers,
+		ServiceID:   req.ServiceID,
+		Middlewares: req.Middlewares,
+	}
+	
+	// Convert metadata
+	if req.Metadata != nil {
+		route.Metadata = make(map[string]interface{})
+		for k, v := range req.Metadata {
+			route.Metadata[k] = v
+		}
+	}
+	
+	// Convert rewrite rules
+	if len(req.RewriteRules) > 0 {
+		route.RewriteRules = make([]types.RewriteRule, len(req.RewriteRules))
+		for i, rule := range req.RewriteRules {
+			route.RewriteRules[i] = types.RewriteRule{
+				Type:        rule.Type,
+				Pattern:     rule.Pattern,
+				Replacement: rule.Replacement,
+			}
+		}
+	}
 	
 	// Validate route
 	if err := validateRoute(&route); err != nil {
@@ -466,7 +522,8 @@ func (h *Handler) handleUpdateRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	respondJSON(w, http.StatusOK, route)
+	response := routeToResponse(&route)
+	respondJSON(w, http.StatusOK, response)
 }
 
 // handleDeleteRoute handles DELETE /api/v1/routes/{id}
@@ -494,7 +551,7 @@ func (h *Handler) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 
 // Metrics endpoint handlers
 
-// handleMetrics handles GET /api/v1/metrics
+// handleMetrics handles GET /api/v1/stats
 func (h *Handler) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// Get real metrics from the global collector
 	stats := metrics.GlobalCollector.GetStats()
@@ -752,10 +809,25 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
+// ErrorResponse represents an error response
+type ErrorResponse struct {
+	Error   string `json:"error"`
+	Code    string `json:"code,omitempty"`
+	Details string `json:"details,omitempty"`
+}
+
 // respondError writes an error response
 func respondError(w http.ResponseWriter, status int, message string) {
-	respondJSON(w, status, map[string]string{
-		"error": message,
+	respondJSON(w, status, ErrorResponse{
+		Error: message,
+	})
+}
+
+// respondErrorWithCode writes an error response with error code
+func respondErrorWithCode(w http.ResponseWriter, status int, message, code string) {
+	respondJSON(w, status, ErrorResponse{
+		Error: message,
+		Code:  code,
 	})
 }
 
@@ -832,3 +904,159 @@ func validateConfig(config *types.ProxyConfig) error {
 }
 
 var startTime = time.Now()
+
+// serviceToResponse converts a types.Service to a ServiceResponse
+func serviceToResponse(s *types.Service) ServiceResponse {
+	return ServiceResponse{
+		ID:          s.ID,
+		Name:        s.Name,
+		Endpoints:   s.Endpoints,
+		HealthPath:  s.HealthPath,
+		Weight:      s.Weight,
+		MaxConns:    s.MaxConns,
+		Timeout:     s.Timeout.String(),
+		Metadata:    s.Metadata,
+		StripPrefix: s.StripPrefix,
+		Active:      s.Active,
+		CreatedAt:   s.CreatedAt,
+		UpdatedAt:   s.UpdatedAt,
+	}
+}
+
+// servicesToResponse converts a slice of types.Service to ServiceResponse
+func servicesToResponse(services []*types.Service) []ServiceResponse {
+	responses := make([]ServiceResponse, len(services))
+	for i, s := range services {
+		responses[i] = serviceToResponse(s)
+	}
+	return responses
+}
+
+// validateServiceRequest validates a service request
+func validateServiceRequest(req *ServiceRequest) error {
+	if req.Name == "" {
+		return fmt.Errorf("service name is required")
+	}
+	
+	if len(req.Endpoints) == 0 {
+		return fmt.Errorf("at least one endpoint is required")
+	}
+	
+	// Validate endpoints format
+	for _, endpoint := range req.Endpoints {
+		if endpoint == "" {
+			return fmt.Errorf("endpoint cannot be empty")
+		}
+	}
+	
+	// Validate timeout format if provided
+	if req.Timeout != "" {
+		if _, err := time.ParseDuration(req.Timeout); err != nil {
+			return fmt.Errorf("invalid timeout format: %v", err)
+		}
+	}
+	
+	if req.Weight < 0 {
+		return fmt.Errorf("weight must be non-negative")
+	}
+	
+	if req.MaxConns < 0 {
+		return fmt.Errorf("max connections must be non-negative")
+	}
+	
+	return nil
+}
+
+// parseServiceRequest converts a ServiceRequest to types.Service
+func parseServiceRequest(req *ServiceRequest, existingService *types.Service) (*types.Service, error) {
+	// Parse timeout
+	var timeout time.Duration
+	if req.Timeout != "" {
+		var err error
+		timeout, err = time.ParseDuration(req.Timeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timeout format: %v", err)
+		}
+	} else {
+		timeout = 30 * time.Second
+	}
+	
+	service := &types.Service{
+		ID:          req.ID,
+		Name:        req.Name,
+		Endpoints:   req.Endpoints,
+		HealthPath:  req.HealthPath,
+		Weight:      req.Weight,
+		MaxConns:    req.MaxConns,
+		Timeout:     timeout,
+		Metadata:    req.Metadata,
+		StripPrefix: req.StripPrefix,
+		Active:      req.Active,
+	}
+	
+	// Preserve timestamps from existing service if updating
+	if existingService != nil {
+		service.CreatedAt = existingService.CreatedAt
+		service.UpdatedAt = time.Now()
+	} else {
+		service.CreatedAt = time.Now()
+		service.UpdatedAt = time.Now()
+	}
+	
+	// Set defaults
+	if service.HealthPath == "" {
+		service.HealthPath = "/"
+	}
+	
+	if service.Weight == 0 {
+		service.Weight = 1
+	}
+	
+	return service, nil
+}
+
+// routeToResponse converts a types.Route to a RouteResponse
+func routeToResponse(r *types.Route) RouteResponse {
+	response := RouteResponse{
+		ID:          r.ID,
+		Priority:    r.Priority,
+		Host:        r.Host,
+		PathPrefix:  r.PathPrefix,
+		PathRegex:   r.PathRegex,
+		Headers:     r.Headers,
+		ServiceID:   r.ServiceID,
+		Middlewares: r.Middlewares,
+		Metadata:    r.Metadata,
+	}
+	
+	// Convert rewrite rules
+	if len(r.RewriteRules) > 0 {
+		response.RewriteRules = make([]struct {
+			Type        string `json:"type"`
+			Pattern     string `json:"pattern"`
+			Replacement string `json:"replacement,omitempty"`
+		}, len(r.RewriteRules))
+		for i, rule := range r.RewriteRules {
+			response.RewriteRules[i] = struct {
+				Type        string `json:"type"`
+				Pattern     string `json:"pattern"`
+				Replacement string `json:"replacement,omitempty"`
+			}{
+				Type:        rule.Type,
+				Pattern:     rule.Pattern,
+				Replacement: rule.Replacement,
+			}
+		}
+	}
+	
+	return response
+}
+
+// routesToResponse converts a slice of types.Route to RouteResponse
+func routesToResponse(routes []*types.Route) []RouteResponse {
+	responses := make([]RouteResponse, len(routes))
+	for i, r := range routes {
+		responses[i] = routeToResponse(r)
+	}
+	return responses
+}

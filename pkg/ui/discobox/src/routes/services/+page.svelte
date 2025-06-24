@@ -31,9 +31,10 @@
 	async function loadServices() {
 		try {
 			loading = true;
-			services = await api.getServices();
+			services = await api.getServices() || [];
 		} catch (error) {
 			console.error('Failed to load services:', error);
+			services = [];
 		} finally {
 			loading = false;
 		}
@@ -91,19 +92,16 @@
 			closeModal();
 		} catch (error) {
 			console.error('Failed to save service:', error);
-			alert('Failed to save service');
+			console.error('Failed to save service:', error);
 		}
 	}
 	
 	async function deleteService(id: string) {
-		if (!confirm('Are you sure you want to delete this service?')) return;
-		
 		try {
 			await api.deleteService(id);
 			await loadServices();
 		} catch (error) {
 			console.error('Failed to delete service:', error);
-			alert('Failed to delete service');
 		}
 	}
 </script>
@@ -128,7 +126,7 @@
 			</div>
 		{:else}
 			<div class="grid gap-4">
-				{#each services as service}
+				{#each services || [] as service}
 					<div class="card bg-base-200 shadow-sm hover:shadow-md transition-shadow duration-200">
 						<div class="card-body">
 							<div class="flex justify-between items-start">
@@ -183,7 +181,7 @@
 					</div>
 				{/each}
 				
-				{#if services.length === 0}
+				{#if !services || services.length === 0}
 					<div class="text-center py-12">
 						<p class="text-base-content/70 mb-4">No services configured yet.</p>
 						<button class="btn btn-primary" onclick={() => openModal()}>Add Your First Service</button>

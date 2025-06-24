@@ -188,7 +188,7 @@ docker-run:
 	docker run -d \
 		--name $(BINARY_NAME) \
 		-p 8080:8080 \
-		-p 9090:9090 \
+		-p 8081:8081 \
 		-v $(PWD)/configs:/etc/discobox \
 		-v $(PWD)/data:/var/lib/discobox \
 		$(DOCKER_IMAGE):$(DOCKER_TAG)

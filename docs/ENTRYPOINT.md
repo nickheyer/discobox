@@ -109,7 +109,7 @@ func main() {
 	// Metrics server
 	if cfg.Metrics.Enabled {
 		go func() {
-			metricsAddr := ":9090" // Default metrics port
+			metricsAddr := ":8081" // Default metrics port
 			logger.Info("Starting metrics server", zap.String("addr", metricsAddr))
 			http.Handle(cfg.Metrics.Path, promhttp.Handler())
 			if err := http.ListenAndServe(metricsAddr, nil); err != nil {
