@@ -4,11 +4,14 @@
 	import { isAuthenticated, isAdmin } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
+	import { toast } from '$lib/stores/toast';
 	
 	let config = $state<any>(null);
 	let loading = $state(true);
 	let reloading = $state(false);
 	let updating = $state(false);
+	let reloadConfirmOpen = $state(false);
 	
 	let configUpdate = $state({
 		loadBalancing: {
@@ -57,18 +60,18 @@
 			// Initialize update form with current values
 			configUpdate = {
 				loadBalancing: {
-					algorithm: config.load_balancing?.algorithm || 'round_robin'
+					algorithm: config.LoadBalancing?.Algorithm || 'round_robin'
 				},
 				rateLimit: {
-					enabled: config.rate_limit?.enabled || false,
-					rps: config.rate_limit?.rps || 1000,
-					burst: config.rate_limit?.burst || 2000
+					enabled: config.RateLimit?.Enabled || false,
+					rps: config.RateLimit?.RPS || 1000,
+					burst: config.RateLimit?.Burst || 2000
 				},
 				circuitBreaker: {
-					enabled: config.circuit_breaker?.enabled || false,
-					failureThreshold: config.circuit_breaker?.failure_threshold || 5,
-					successThreshold: config.circuit_breaker?.success_threshold || 2,
-					timeout: config.circuit_breaker?.timeout || '60s'
+					enabled: config.CircuitBreaker?.Enabled || false,
+					failureThreshold: config.CircuitBreaker?.FailureThreshold || 5,
+					successThreshold: config.CircuitBreaker?.SuccessThreshold || 2,
+					timeout: config.CircuitBreaker?.Timeout ? `${config.CircuitBreaker.Timeout / 1000000000}s` : '60s'
 				}
 			};
 		} catch (error) {
@@ -78,9 +81,11 @@
 		}
 	}
 	
+	function requestReloadConfig() {
+		reloadConfirmOpen = true;
+	}
+	
 	async function reloadConfig() {
-		if (!confirm('This will reload the configuration from disk. Are you sure?')) return;
-		
 		try {
 			reloading = true;
 			const res = await fetch('/api/v1/admin/reload', {
@@ -93,11 +98,11 @@
 			if (!res.ok) throw new Error('Failed to reload config');
 			
 			const result = await res.json();
-			alert(result.message || 'Configuration reloaded successfully');
+			toast.success(result.message || 'Configuration reloaded successfully');
 			await loadConfig();
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Failed to reload config:', error);
-			alert('Failed to reload configuration');
+			toast.error(error.message || 'Failed to reload configuration');
 		} finally {
 			reloading = false;
 		}
@@ -106,23 +111,44 @@
 	async function updateConfig() {
 		try {
 			updating = true;
+			
+			// Transform the config to match the API's expected format
+			const configPayload = {
+				LoadBalancing: {
+					Algorithm: configUpdate.loadBalancing.algorithm
+				},
+				RateLimit: {
+					Enabled: configUpdate.rateLimit.enabled,
+					RPS: configUpdate.rateLimit.rps,
+					Burst: configUpdate.rateLimit.burst
+				},
+				CircuitBreaker: {
+					Enabled: configUpdate.circuitBreaker.enabled,
+					FailureThreshold: configUpdate.circuitBreaker.failureThreshold,
+					SuccessThreshold: configUpdate.circuitBreaker.successThreshold,
+					Timeout: parseInt(configUpdate.circuitBreaker.timeout.replace(/[^0-9]/g, '')) * 1000000000 // Convert seconds to nanoseconds
+				}
+			};
 			const res = await fetch('/api/v1/admin/config', {
 				method: 'PUT',
 				headers: {
 					'X-API-Key': localStorage.getItem('apiKey') || '',
 					'Content-Type': 'application/json'
 				},
-				body: JSON.stringify(configUpdate)
+				body: JSON.stringify(configPayload)
 			});
 			
-			if (!res.ok) throw new Error('Failed to update config');
+			if (!res.ok) {
+				const errorText = await res.text();
+				throw new Error(errorText || 'Failed to update config');
+			}
 			
 			const result = await res.json();
-			alert(result.message || 'Configuration updated successfully');
+			toast.success(result.message || 'Configuration updated successfully. You may need to reload from disk to apply changes.');
 			await loadConfig();
-		} catch (error) {
+		} catch (error: any) {
 			console.error('Failed to update config:', error);
-			alert('Failed to update configuration');
+			toast.error(error.message || 'Failed to update configuration');
 		} finally {
 			updating = false;
 		}
@@ -137,7 +163,7 @@
 			<h1 class="text-3xl font-bold">Admin Configuration</h1>
 			<button 
 				class="btn btn-primary" 
-				onclick={reloadConfig}
+				onclick={requestReloadConfig}
 				disabled={reloading}
 			>
 				{#if reloading}
@@ -160,43 +186,53 @@
 						<div class="grid gap-6 lg:grid-cols-2">
 							<div>
 								<h3 class="font-semibold mb-3 text-sm uppercase text-base-content/70">Server Settings</h3>
-								<div class="space-y-2">
-									<div class="flex justify-between items-center py-1 border-b border-base-300">
-										<span class="text-sm">Listen Address</span>
-										<span class="font-mono text-sm">{config.listen_addr}</span>
+								<div class="space-y-3">
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">Listen Address</span>
+										<span class="font-mono text-sm font-medium">{config.ListenAddr || ':8080'}</span>
 									</div>
-									<div class="flex justify-between items-center py-1 border-b border-base-300">
-										<span class="text-sm">TLS Enabled</span>
-										<span class="badge badge-sm" class:badge-success={config.tls?.enabled} class:badge-ghost={!config.tls?.enabled}>
-											{config.tls?.enabled ? 'Yes' : 'No'}
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">TLS Enabled</span>
+										<span class="badge badge-sm" class:badge-success={config.TLS?.Enabled} class:badge-ghost={!config.TLS?.Enabled}>
+											{config.TLS?.Enabled ? 'Yes' : 'No'}
 										</span>
 									</div>
-									<div class="flex justify-between items-center py-1 border-b border-base-300">
-										<span class="text-sm">HTTP/2 Enabled</span>
-										<span class="badge badge-sm" class:badge-success={config.http2?.enabled} class:badge-ghost={!config.http2?.enabled}>
-											{config.http2?.enabled ? 'Yes' : 'No'}
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">HTTP/2 Enabled</span>
+										<span class="badge badge-sm" class:badge-success={config.HTTP2?.Enabled} class:badge-ghost={!config.HTTP2?.Enabled}>
+											{config.HTTP2?.Enabled ? 'Yes' : 'No'}
 										</span>
+									</div>
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">API Address</span>
+										<span class="font-mono text-sm font-medium">{config.API?.Addr || ':8081'}</span>
 									</div>
 								</div>
 							</div>
 							
 							<div>
 								<h3 class="font-semibold mb-3 text-sm uppercase text-base-content/70">Features</h3>
-								<div class="space-y-2">
-									<div class="flex justify-between items-center py-1 border-b border-base-300">
-										<span class="text-sm">Load Balancing</span>
-										<span class="badge badge-sm badge-primary">{config.load_balancing?.algorithm}</span>
+								<div class="space-y-3">
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">Load Balancing</span>
+										<span class="badge badge-primary">{config.LoadBalancing?.Algorithm || 'round_robin'}</span>
 									</div>
-									<div class="flex justify-between items-center py-1 border-b border-base-300">
-										<span class="text-sm">Sticky Sessions</span>
-										<span class="badge badge-sm" class:badge-success={config.load_balancing?.sticky?.enabled} class:badge-ghost={!config.load_balancing?.sticky?.enabled}>
-											{config.load_balancing?.sticky?.enabled ? 'Enabled' : 'Disabled'}
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">Sticky Sessions</span>
+										<span class="badge badge-sm" class:badge-success={config.LoadBalancing?.Sticky?.Enabled} class:badge-ghost={!config.LoadBalancing?.Sticky?.Enabled}>
+											{config.LoadBalancing?.Sticky?.Enabled ? 'Enabled' : 'Disabled'}
 										</span>
 									</div>
-									<div class="flex justify-between items-center py-1 border-b border-base-300">
-										<span class="text-sm">Rate Limiting</span>
-										<span class="badge badge-sm" class:badge-success={config.rate_limit?.enabled} class:badge-ghost={!config.rate_limit?.enabled}>
-											{config.rate_limit?.enabled ? 'Enabled' : 'Disabled'}
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">Rate Limiting</span>
+										<span class="badge badge-sm" class:badge-success={config.RateLimit?.Enabled} class:badge-ghost={!config.RateLimit?.Enabled}>
+											{config.RateLimit?.Enabled ? `${config.RateLimit?.RPS || 0} req/s` : 'Disabled'}
+										</span>
+									</div>
+									<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
+										<span class="text-sm text-base-content/70">Circuit Breaker</span>
+										<span class="badge badge-sm" class:badge-success={config.CircuitBreaker?.Enabled} class:badge-ghost={!config.CircuitBreaker?.Enabled}>
+											{config.CircuitBreaker?.Enabled ? 'Enabled' : 'Disabled'}
 										</span>
 									</div>
 								</div>
@@ -209,131 +245,66 @@
 				<div class="card bg-base-200">
 					<div class="card-body">
 						<h2 class="card-title">Runtime Configuration</h2>
-						<div class="alert alert-info mb-4">
+						<div class="alert alert-warning mb-4">
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
 							</svg>
-							<span>These settings can be updated without restarting the proxy.</span>
+							<div>
+								<p class="font-semibold">Runtime changes only!</p>
+								<p class="text-sm">These changes update the running configuration but are NOT persisted to disk. To make permanent changes, update the config file and reload.</p>
+							</div>
 						</div>
 						
 						<div class="space-y-6">
 							<!-- Load Balancing -->
-							<div>
-								<h3 class="font-semibold mb-2">Load Balancing</h3>
-								<div class="form-control">
-									<label for="lb-algorithm" class="label">
-										<span class="label-text">Algorithm</span>
-									</label>
-									<select 
-										id="lb-algorithm"
-										class="select select-bordered"
-										bind:value={configUpdate.loadBalancing.algorithm}
-									>
-										<option value="round_robin">Round Robin</option>
-										<option value="weighted">Weighted</option>
-										<option value="least_conn">Least Connections</option>
-										<option value="ip_hash">IP Hash</option>
-									</select>
-								</div>
-							</div>
+							<fieldset class="fieldset">
+								<legend class="fieldset-legend">Load Balancing Algorithm</legend>
+								<select class="select" bind:value={configUpdate.loadBalancing.algorithm}>
+									<option value="round_robin">Round Robin</option>
+									<option value="weighted">Weighted</option>
+									<option value="least_conn">Least Connections</option>
+									<option value="ip_hash">IP Hash</option>
+								</select>
+								<p class="label">Select load balancing method</p>
+							</fieldset>
 							
 							<!-- Rate Limiting -->
-							<div>
-								<h3 class="font-semibold mb-2">Rate Limiting</h3>
-								<div class="form-control">
-									<label class="label cursor-pointer">
-										<span class="label-text">Enable Rate Limiting</span>
-										<input 
-											type="checkbox" 
-											class="toggle toggle-primary"
-											bind:checked={configUpdate.rateLimit.enabled}
-										/>
-									</label>
-								</div>
-								{#if configUpdate.rateLimit.enabled}
-									<div class="grid grid-cols-2 gap-4 mt-2">
-										<div class="form-control">
-											<label for="rl-rps" class="label">
-												<span class="label-text">Requests Per Second</span>
-											</label>
-											<input 
-												id="rl-rps"
-												type="number" 
-												class="input input-bordered"
-												bind:value={configUpdate.rateLimit.rps}
-												min="1"
-											/>
-										</div>
-										<div class="form-control">
-											<label for="rl-burst" class="label">
-												<span class="label-text">Burst Size</span>
-											</label>
-											<input 
-												id="rl-burst"
-												type="number" 
-												class="input input-bordered"
-												bind:value={configUpdate.rateLimit.burst}
-												min="1"
-											/>
-										</div>
-									</div>
-								{/if}
-							</div>
+							<div class="divider"></div>
+							<label class="label cursor-pointer">
+								<span class="label-text font-semibold">Rate Limiting</span>
+								<input type="checkbox" class="checkbox checkbox-primary" bind:checked={configUpdate.rateLimit.enabled} />
+							</label>
+							{#if configUpdate.rateLimit.enabled}
+								<label class="input input-bordered flex items-center gap-2">
+									RPS
+									<input type="number" class="grow" bind:value={configUpdate.rateLimit.rps} min="1" max="100000" placeholder="1000" />
+								</label>
+								<label class="input input-bordered flex items-center gap-2">
+									Burst
+									<input type="number" class="grow" bind:value={configUpdate.rateLimit.burst} min="1" max="200000" placeholder="2000" />
+								</label>
+							{/if}
 							
 							<!-- Circuit Breaker -->
-							<div>
-								<h3 class="font-semibold mb-2">Circuit Breaker</h3>
-								<div class="form-control">
-									<label class="label cursor-pointer">
-										<span class="label-text">Enable Circuit Breaker</span>
-										<input 
-											type="checkbox" 
-											class="toggle toggle-primary"
-											bind:checked={configUpdate.circuitBreaker.enabled}
-										/>
-									</label>
-								</div>
-								{#if configUpdate.circuitBreaker.enabled}
-									<div class="grid grid-cols-3 gap-4 mt-2">
-										<div class="form-control">
-											<label for="cb-fail" class="label">
-												<span class="label-text">Failure Threshold</span>
-											</label>
-											<input 
-												id="cb-fail"
-												type="number" 
-												class="input input-bordered"
-												bind:value={configUpdate.circuitBreaker.failureThreshold}
-												min="1"
-											/>
-										</div>
-										<div class="form-control">
-											<label for="cb-success" class="label">
-												<span class="label-text">Success Threshold</span>
-											</label>
-											<input 
-												id="cb-success"
-												type="number" 
-												class="input input-bordered"
-												bind:value={configUpdate.circuitBreaker.successThreshold}
-												min="1"
-											/>
-										</div>
-										<div class="form-control">
-											<label for="cb-timeout" class="label">
-												<span class="label-text">Timeout</span>
-											</label>
-											<input 
-												id="cb-timeout"
-												type="text" 
-												class="input input-bordered"
-												bind:value={configUpdate.circuitBreaker.timeout}
-												placeholder="60s"
-											/>
-										</div>
-									</div>
-								{/if}
-							</div>
+							<div class="divider"></div>
+							<label class="label cursor-pointer">
+								<span class="label-text font-semibold">Circuit Breaker</span>
+								<input type="checkbox" class="checkbox checkbox-primary" bind:checked={configUpdate.circuitBreaker.enabled} />
+							</label>
+							{#if configUpdate.circuitBreaker.enabled}
+								<label class="input input-bordered flex items-center gap-2">
+									Failures
+									<input type="number" class="grow" bind:value={configUpdate.circuitBreaker.failureThreshold} min="1" max="100" placeholder="5" />
+								</label>
+								<label class="input input-bordered flex items-center gap-2">
+									Successes
+									<input type="number" class="grow" bind:value={configUpdate.circuitBreaker.successThreshold} min="1" max="50" placeholder="2" />
+								</label>
+								<label class="input input-bordered flex items-center gap-2">
+									Timeout
+									<input type="text" class="grow" bind:value={configUpdate.circuitBreaker.timeout} placeholder="60s" />
+								</label>
+							{/if}
 						</div>
 						
 						<div class="card-actions justify-end mt-6">
@@ -354,3 +325,13 @@
 		{/if}
 	</div>
 {/if}
+
+<ConfirmModal
+	bind:open={reloadConfirmOpen}
+	title="Reload Configuration"
+	message="This will reload the configuration from disk. Any unsaved runtime changes will be lost. Are you sure?"
+	confirmText="Reload"
+	cancelText="Cancel"
+	onConfirm={reloadConfig}
+	onCancel={() => {}}
+/>

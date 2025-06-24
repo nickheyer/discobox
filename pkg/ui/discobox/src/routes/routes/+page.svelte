@@ -11,6 +11,8 @@
 	let loading = $state(true);
 	let showModal = $state(false);
 	let editingRoute = $state<Route | null>(null);
+	let deleteConfirmOpen = $state(false);
+	let routeToDelete = $state<string | null>(null);
 	let formData = $state({
 		id: '',
 		priority: 100,
@@ -238,122 +240,126 @@
 	
 	<!-- Modal -->
 	<dialog class="modal" class:modal-open={showModal}>
-		<div class="modal-box max-w-2xl max-h-[90vh] overflow-y-auto">
-			<h3 class="font-bold text-lg mb-4">
+		<div class="modal-box max-w-3xl">
+			<h3 class="text-xl font-bold mb-6">
 				{editingRoute ? 'Edit Route' : 'Add Route'}
 			</h3>
 			
-			<div class="space-y-4">
-				<div class="grid grid-cols-2 gap-4">
-					<div class="form-control">
-						<label for="route-id" class="label">
-							<span class="label-text">Route ID</span>
-						</label>
-						<input
-							id="route-id"
-							type="text"
-							class="input input-bordered"
-							bind:value={formData.id}
-							placeholder="my-route"
-							disabled={!!editingRoute}
-						/>
-					</div>
+			<form class="space-y-6">
+				<!-- Basic Information -->
+				<div class="space-y-4">
+					<div class="divider text-sm">Basic Information</div>
 					
-					<div class="form-control">
-						<label for="priority" class="label">
-							<span class="label-text">Priority</span>
-						</label>
-						<input
-							id="priority"
-							type="number"
-							class="input input-bordered"
-							bind:value={formData.priority}
-							min="1"
-						/>
+					<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend">Route ID</legend>
+							<input
+								type="text"
+								class="input"
+								bind:value={formData.id}
+								placeholder="my-route"
+								disabled={!!editingRoute}
+							/>
+							<p class="label">Unique identifier</p>
+						</fieldset>
+						
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend">Priority</legend>
+							<input
+								type="number"
+								class="input"
+								bind:value={formData.priority}
+								min="1"
+								max="10000"
+								required
+								placeholder="1-10000"
+							/>
+							<p class="label">Higher number = higher priority</p>
+						</fieldset>
+						
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend">Target Service</legend>
+							<select
+								class="select"
+								bind:value={formData.service_id}
+								required
+							>
+								<option value="" disabled>Select a service</option>
+								{#each services as service}
+									<option value={service.id}>
+										{service.name} ({service.id})
+									</option>
+								{/each}
+							</select>
+							<p class="label">Required</p>
+						</fieldset>
 					</div>
 				</div>
 				
-				<div class="form-control">
-					<label for="service" class="label">
-						<span class="label-text">Service</span>
-					</label>
-					<select
-						id="service"
-						class="select select-bordered"
-						bind:value={formData.service_id}
-						required
-					>
-						<option value="">Select a service</option>
-						{#each services as service}
-							<option value={service.id}>{service.name} ({service.id})</option>
-						{/each}
-					</select>
-				</div>
-				
-				<div class="form-control">
-					<label for="host" class="label">
-						<span class="label-text">Host (optional)</span>
-					</label>
-					<input
-						id="host"
-						type="text"
-						class="input input-bordered"
-						bind:value={formData.host}
-						placeholder="example.com or *.example.com"
-					/>
-				</div>
-				
-				<div class="grid grid-cols-2 gap-4">
-					<div class="form-control">
-						<label for="path-prefix" class="label">
-							<span class="label-text">Path Prefix (optional)</span>
-						</label>
-						<input
-							id="path-prefix"
-							type="text"
-							class="input input-bordered"
-							bind:value={formData.path_prefix}
-							placeholder="/api"
-						/>
-					</div>
+				<!-- Matching Rules -->
+				<div class="space-y-4">
+					<div class="divider text-sm">Matching Rules</div>
+					<p class="text-sm text-base-content/70">At least one matching rule is required</p>
 					
-					<div class="form-control">
-						<label for="path-regex" class="label">
-							<span class="label-text">Path Regex (optional)</span>
-						</label>
+					<label class="input">
+						Host
 						<input
-							id="path-regex"
 							type="text"
-							class="input input-bordered"
-							bind:value={formData.path_regex}
-							placeholder="^/api/v[0-9]+/.*"
+							class="grow"
+							bind:value={formData.host}
+							placeholder="example.com or *.example.com"
 						/>
+						<span class="badge badge-neutral badge-xs">Optional</span>
+					</label>
+					
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<label class="input">
+							Path Prefix
+							<input
+								type="text"
+								class="grow"
+								bind:value={formData.path_prefix}
+								placeholder="/api"
+							/>
+							<span class="badge badge-neutral badge-xs">Optional</span>
+						</label>
+						
+						<label class="input">
+							Path Regex
+							<input
+								type="text"
+								class="grow"
+								bind:value={formData.path_regex}
+								placeholder="^/api/v[0-9]+/.*"
+							/>
+							<span class="badge badge-neutral badge-xs">Optional</span>
+						</label>
 					</div>
 				</div>
 				
-				<div class="form-control">
-					<div class="label">
-						<span class="label-text">Middlewares</span>
-					</div>
-					<div class="grid grid-cols-2 gap-2">
+				<!-- Middlewares -->
+				<div class="space-y-4">
+					<div class="divider text-sm">Middlewares</div>
+					
+					<div class="grid grid-cols-2 md:grid-cols-3 gap-3">
 						{#each availableMiddlewares as mw}
-							<label class="label cursor-pointer justify-start gap-2 p-2 rounded hover:bg-base-300">
+							<label class="label cursor-pointer bg-base-200 rounded-lg p-3 hover:bg-base-300 transition-colors">
+								<span class="label-text">{mw}</span>
 								<input
 									type="checkbox"
-									class="checkbox checkbox-sm"
+									class="checkbox checkbox-primary"
 									checked={formData.middlewares.includes(mw)}
 									onchange={() => toggleMiddleware(mw)}
 								/>
-								<span class="label-text text-sm">{mw}</span>
 							</label>
 						{/each}
 					</div>
 				</div>
-			</div>
+			</form>
 			
 			<div class="modal-action">
-				<button class="btn" onclick={closeModal}>Cancel</button>
-				<button class="btn btn-primary" onclick={saveRoute}>Save</button>
+				<button class="btn btn-ghost" onclick={closeModal}>Cancel</button>
+				<button class="btn btn-primary" onclick={saveRoute}>Save Route</button>
 			</div>
 		</div>
 		<form method="dialog" class="modal-backdrop">

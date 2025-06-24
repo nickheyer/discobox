@@ -4,6 +4,7 @@
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import { formatNumber, formatMemoryMB } from '$lib/utils';
 	import type { Health, Metrics, Service, Route } from '$lib/types';
 	
 	let health = $state<Health | null>(null);
@@ -66,8 +67,8 @@
 						</svg>
 					</div>
 					<div class="stat-title">Requests</div>
-					<div class="stat-value text-secondary">{metrics?.requests?.per_second || 0}/s</div>
-					<div class="stat-desc">{metrics?.requests?.total || 0} total</div>
+					<div class="stat-value text-secondary">{formatNumber(metrics?.requests?.per_second || 0, 1)}/s</div>
+					<div class="stat-desc">{formatNumber(metrics?.requests?.total || 0, 0)} total</div>
 				</div>
 				
 				<div class="stat bg-base-200 rounded-box shadow-sm hover:shadow-md transition-shadow duration-200">
@@ -121,7 +122,7 @@
 								</tbody>
 							</table>
 						</div>
-						<div class="card-actions justify-end">
+						<div class="card-actions justify-end mt-4">
 							<a href="/services" class="btn btn-primary btn-sm gap-2">
 								<span>View All</span>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -146,7 +147,7 @@
 							</div>
 							<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
 								<span class="text-base-content/70">Memory</span>
-								<span class="font-mono">{metrics?.system?.memory_mb || 0} MB</span>
+								<span class="font-mono">{formatMemoryMB(metrics?.system?.memory_mb || 0)}</span>
 							</div>
 							<div class="flex justify-between items-center p-2 rounded hover:bg-base-300 transition-colors">
 								<span class="text-base-content/70">Goroutines</span>

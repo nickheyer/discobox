@@ -103,26 +103,26 @@ type RouteResponse struct {
 		Pattern     string `json:"pattern"`
 		Replacement string `json:"replacement,omitempty"`
 	} `json:"rewrite_rules,omitempty"`
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // ConfigUpdate represents a configuration update request
 type ConfigUpdate struct {
-	// Partial config updates
+	// Partial config updates - using PascalCase to match frontend
 	LoadBalancing *struct {
-		Algorithm string `json:"algorithm,omitempty"`
-	} `json:"load_balancing,omitempty"`
+		Algorithm string `json:"Algorithm,omitempty"`
+	} `json:"LoadBalancing,omitempty"`
 	
 	RateLimit *struct {
-		Enabled bool `json:"enabled"`
-		RPS     int  `json:"rps,omitempty"`
-		Burst   int  `json:"burst,omitempty"`
-	} `json:"rate_limit,omitempty"`
+		Enabled bool `json:"Enabled"`
+		RPS     int  `json:"RPS,omitempty"`
+		Burst   int  `json:"Burst,omitempty"`
+	} `json:"RateLimit,omitempty"`
 	
 	CircuitBreaker *struct {
-		Enabled          bool          `json:"enabled"`
-		FailureThreshold int           `json:"failure_threshold,omitempty"`
-		SuccessThreshold int           `json:"success_threshold,omitempty"`
-		Timeout          time.Duration `json:"timeout,omitempty"`
-	} `json:"circuit_breaker,omitempty"`
+		Enabled          bool          `json:"Enabled"`
+		FailureThreshold int           `json:"FailureThreshold,omitempty"`
+		SuccessThreshold int           `json:"SuccessThreshold,omitempty"`
+		Timeout          time.Duration `json:"Timeout,omitempty"`
+	} `json:"CircuitBreaker,omitempty"`
 }

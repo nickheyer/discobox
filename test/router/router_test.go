@@ -11,6 +11,7 @@ import (
 	"discobox/internal/router"
 	"discobox/internal/storage"
 	"discobox/internal/types"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,16 +19,16 @@ import (
 // testLogger is a simple logger implementation for tests
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, fields ...interface{}) {}
-func (l *testLogger) Info(msg string, fields ...interface{})  {}
-func (l *testLogger) Warn(msg string, fields ...interface{})  {}
-func (l *testLogger) Error(msg string, fields ...interface{}) {}
-func (l *testLogger) With(fields ...interface{}) types.Logger { return l }
+func (l *testLogger) Debug(msg string, fields ...any) {}
+func (l *testLogger) Info(msg string, fields ...any)  {}
+func (l *testLogger) Warn(msg string, fields ...any)  {}
+func (l *testLogger) Error(msg string, fields ...any) {}
+func (l *testLogger) With(fields ...any) types.Logger { return l }
 
 func TestRouterBasicRouting(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMemory()
-	
+
 	// Setup all data before creating router
 	service1 := &types.Service{
 		ID:        "service1",
@@ -36,12 +37,12 @@ func TestRouterBasicRouting(t *testing.T) {
 		Active:    true,
 	}
 	service2 := &types.Service{
-		ID:        "service2", 
+		ID:        "service2",
 		Name:      "Service 2",
 		Endpoints: []string{"http://backend2:8080"},
 		Active:    true,
 	}
-	
+
 	err := store.CreateService(ctx, service1)
 	require.NoError(t, err)
 	err = store.CreateService(ctx, service2)
@@ -127,7 +128,7 @@ func TestRouterBasicRouting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://"+tt.host+tt.path, nil)
 			route, err := r.Match(req)
-			
+
 			if tt.expectedService == "" {
 				assert.Error(t, err)
 				assert.Nil(t, route)
@@ -182,7 +183,7 @@ func TestRouterWildcardHost(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://"+tt.host+"/test", nil)
 			route, err := r.Match(req)
-			
+
 			if tt.matches {
 				assert.NoError(t, err)
 				require.NotNil(t, route)
@@ -239,7 +240,7 @@ func TestRouterPathRegex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://example.com"+tt.path, nil)
 			route, err := r.Match(req)
-			
+
 			if tt.matches {
 				assert.NoError(t, err)
 				require.NotNil(t, route)
@@ -269,7 +270,7 @@ func TestRouterHeaderMatching(t *testing.T) {
 		Endpoints: []string{"http://desktop-backend:8080"},
 		Active:    true,
 	}
-	
+
 	err := store.CreateService(ctx, service1)
 	require.NoError(t, err)
 	err = store.CreateService(ctx, service2)
@@ -357,9 +358,9 @@ func TestRouterHeaderMatching(t *testing.T) {
 			for k, v := range tt.headers {
 				req.Header.Set(k, v)
 			}
-			
+
 			route, err := r.Match(req)
-			
+
 			if tt.expectedService == "" {
 				assert.Error(t, err)
 				assert.Nil(t, route)
@@ -392,21 +393,21 @@ func TestRouterPriorityOrdering(t *testing.T) {
 			Priority:   10,
 			PathPrefix: "/",
 			ServiceID:  "test-service",
-			Metadata:   map[string]interface{}{"name": "catch-all"},
+			Metadata:   map[string]any{"name": "catch-all"},
 		},
 		{
 			ID:         "medium-priority",
 			Priority:   50,
 			PathPrefix: "/api",
 			ServiceID:  "test-service",
-			Metadata:   map[string]interface{}{"name": "api"},
+			Metadata:   map[string]any{"name": "api"},
 		},
 		{
 			ID:         "high-priority",
 			Priority:   100,
 			PathPrefix: "/api/v1",
 			ServiceID:  "test-service",
-			Metadata:   map[string]interface{}{"name": "api-v1"},
+			Metadata:   map[string]any{"name": "api-v1"},
 		},
 	}
 
@@ -448,7 +449,7 @@ func TestRouterPriorityOrdering(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://example.com"+tt.path, nil)
 			route, err := r.Match(req)
-			
+
 			assert.NoError(t, err)
 			require.NotNil(t, route)
 			assert.Equal(t, tt.expectedName, route.Metadata["name"])
@@ -630,16 +631,16 @@ func TestRouterConcurrentRouting(t *testing.T) {
 		wg.Add(1)
 		go func(goroutineID int) {
 			defer wg.Done()
-			
+
 			for reqNum := 0; reqNum < numRequestsPerGoroutine; reqNum++ {
 				// Random service and path
 				serviceID := goroutineID % numServices
 				pathID := reqNum % numRoutesPerService
 				path := fmt.Sprintf("/service%d/path%d/test", serviceID, pathID)
-				
+
 				req := httptest.NewRequest("GET", "http://example.com"+path, nil)
 				route, err := r.Match(req)
-				
+
 				assert.NoError(t, err)
 				assert.NotNil(t, route)
 				assert.Equal(t, fmt.Sprintf("service-%d", serviceID), route.ServiceID)
@@ -750,9 +751,9 @@ func TestRouterComplexMatching(t *testing.T) {
 			matches: false,
 		},
 		{
-			name: "Missing header",
-			host: "api.example.com",
-			path: "/api/v1/users",
+			name:    "Missing header",
+			host:    "api.example.com",
+			path:    "/api/v1/users",
 			headers: map[string]string{},
 			matches: false,
 		},
@@ -773,9 +774,9 @@ func TestRouterComplexMatching(t *testing.T) {
 			for k, v := range tt.headers {
 				req.Header.Set(k, v)
 			}
-			
+
 			route, err := r.Match(req)
-			
+
 			if tt.matches {
 				assert.NoError(t, err)
 				require.NotNil(t, route)
@@ -827,17 +828,17 @@ func TestRouterPerformance(t *testing.T) {
 		path := fmt.Sprintf("/path%d/test", i%numRoutes)
 		req := httptest.NewRequest("GET", "http://example.com"+path, nil)
 		route, err := r.Match(req)
-		
+
 		assert.NoError(t, err)
 		assert.NotNil(t, route)
 	}
 
 	elapsed := time.Since(start)
 	perRequest := elapsed / time.Duration(iterations)
-	
+
 	t.Logf("Routing performance: %d routes, %d iterations, %v total, %v per request",
 		numRoutes, iterations, elapsed, perRequest)
-	
+
 	// Ensure reasonable performance (< 1ms per request)
 	assert.Less(t, perRequest, time.Millisecond)
 }

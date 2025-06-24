@@ -32,35 +32,39 @@
 		
 		<div class="card w-full max-w-sm bg-base-200 shadow-lg mt-8">
 			<form class="card-body" onsubmit={handleLogin}>
-				<div class="form-control">
-					<label class="label" for="username">
-						<span class="label-text">Username</span>
-					</label>
+				<label class="input mb-4">
+					<svg class="h-[1em] opacity-50" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+						<g stroke-linejoin="round" stroke-linecap="round" stroke-width="2.5" fill="none" stroke="currentColor">
+							<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+							<circle cx="12" cy="7" r="4"></circle>
+						</g>
+					</svg>
 					<input
-						id="username"
 						type="text"
-						placeholder="admin"
-						class="input input-bordered"
+						placeholder="Username"
+						class="grow"
 						bind:value={username}
 						required
 						disabled={loading}
 					/>
-				</div>
+				</label>
 				
-				<div class="form-control">
-					<label class="label" for="password">
-						<span class="label-text">Password</span>
-					</label>
+				<label class="input mb-4">
+					<svg class="h-[1em] opacity-50" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+						<g stroke-linejoin="round" stroke-linecap="round" stroke-width="2.5" fill="none" stroke="currentColor">
+							<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+							<path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+						</g>
+					</svg>
 					<input
-						id="password"
 						type="password"
-						placeholder="••••••••"
-						class="input input-bordered"
+						placeholder="Password"
+						class="grow"
 						bind:value={password}
 						required
 						disabled={loading}
 					/>
-				</div>
+				</label>
 				
 				{#if error}
 					<div class="alert alert-error">

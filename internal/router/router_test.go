@@ -19,20 +19,20 @@ import (
 // mockLogger implements types.Logger for testing
 type mockLogger struct{}
 
-func (l *mockLogger) Debug(msg string, fields ...interface{}) {}
-func (l *mockLogger) Info(msg string, fields ...interface{})  {}
-func (l *mockLogger) Warn(msg string, fields ...interface{})  {}
-func (l *mockLogger) Error(msg string, fields ...interface{}) {}
-func (l *mockLogger) With(fields ...interface{}) types.Logger { return l }
+func (l *mockLogger) Debug(msg string, fields ...any) {}
+func (l *mockLogger) Info(msg string, fields ...any)  {}
+func (l *mockLogger) Warn(msg string, fields ...any)  {}
+func (l *mockLogger) Error(msg string, fields ...any) {}
+func (l *mockLogger) With(fields ...any) types.Logger { return l }
 
 // Helper function to create a test service
 func createTestService(t *testing.T, s types.Storage, id string) {
 	service := &types.Service{
-		ID:   id,
-		Name: "Test Service " + id,
+		ID:        id,
+		Name:      "Test Service " + id,
 		Endpoints: []string{"http://localhost:8080"},
-		Active: true,
-		Weight: 1,
+		Active:    true,
+		Weight:    1,
 	}
 	err := s.CreateService(context.Background(), service)
 	require.NoError(t, err)
@@ -412,21 +412,21 @@ func TestRouterGetRoutes(t *testing.T) {
 	// Add multiple routes before creating router
 	routes := []*types.Route{
 		{
-			ID:       "route1",
-			Host:     "example.com",
-			Priority: 100,
+			ID:        "route1",
+			Host:      "example.com",
+			Priority:  100,
 			ServiceID: "service1",
 		},
 		{
-			ID:       "route2",
-			Host:     "api.example.com",
-			Priority: 200,
+			ID:        "route2",
+			Host:      "api.example.com",
+			Priority:  200,
 			ServiceID: "service2",
 		},
 		{
-			ID:       "route3",
-			Host:     "admin.example.com",
-			Priority: 150,
+			ID:        "route3",
+			Host:      "admin.example.com",
+			Priority:  150,
 			ServiceID: "service3",
 		},
 	}
@@ -463,10 +463,10 @@ func TestRouterConcurrentAccess(t *testing.T) {
 	// Add initial routes before creating router
 	for i := 0; i < 10; i++ {
 		route := &types.Route{
-			ID:         fmt.Sprintf("route%d", i),
-			Host:       fmt.Sprintf("host%d.example.com", i),
-			ServiceID:  fmt.Sprintf("service%d", i),
-			Priority:   i * 10,
+			ID:        fmt.Sprintf("route%d", i),
+			Host:      fmt.Sprintf("host%d.example.com", i),
+			ServiceID: fmt.Sprintf("service%d", i),
+			Priority:  i * 10,
 		}
 		err := s.CreateRoute(ctx, route)
 		require.NoError(t, err)

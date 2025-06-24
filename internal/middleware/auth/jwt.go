@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	
+
 	"crypto/rsa"
-	"github.com/golang-jwt/jwt/v5"
 	"net/http"
-	
+
+	"github.com/golang-jwt/jwt/v5"
+
 	"discobox/internal/types"
 )
 
@@ -17,7 +18,7 @@ func JWT(config types.ProxyConfig) types.Middleware {
 	cfg := config.Middleware.Auth.JWT
 
 	// Load key
-	var key interface{}
+	var key any
 
 	if cfg.KeyFile != "" {
 		keyData, err := os.ReadFile(cfg.KeyFile)
@@ -48,7 +49,7 @@ func JWT(config types.ProxyConfig) types.Middleware {
 			}
 
 			// Parse and validate token
-			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 				// Validate signing method
 				switch token.Method.(type) {
 				case *jwt.SigningMethodRSA, *jwt.SigningMethodRSAPSS:

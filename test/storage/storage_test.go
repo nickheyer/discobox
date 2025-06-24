@@ -9,20 +9,21 @@ import (
 
 	"discobox/internal/storage"
 	"discobox/internal/types"
+
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // testLogger is a simple logger implementation for tests
 type testLogger struct{}
 
-func (l *testLogger) Debug(msg string, fields ...interface{}) {}
-func (l *testLogger) Info(msg string, fields ...interface{})  {}
-func (l *testLogger) Warn(msg string, fields ...interface{})  {}
-func (l *testLogger) Error(msg string, fields ...interface{}) {}
-func (l *testLogger) With(fields ...interface{}) types.Logger { return l }
+func (l *testLogger) Debug(msg string, fields ...any) {}
+func (l *testLogger) Info(msg string, fields ...any)  {}
+func (l *testLogger) Warn(msg string, fields ...any)  {}
+func (l *testLogger) Error(msg string, fields ...any) {}
+func (l *testLogger) With(fields ...any) types.Logger { return l }
 
 func setupMemoryStorage(t *testing.T) types.Storage {
 	s := storage.NewMemory()
@@ -48,7 +49,7 @@ func setupEtcdStorage(t *testing.T) types.Storage {
 		t.Skip("etcd not available: " + err.Error())
 		return nil
 	}
-	
+
 	// Test connection
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -209,11 +210,11 @@ func testRouteOperations(t *testing.T, setupFunc func(*testing.T) types.Storage)
 
 	// Test CreateRoute
 	route1 := &types.Route{
-		ID:         "route1",
-		Priority:   100,
-		Host:       "example.com",
-		PathPrefix: "/api",
-		ServiceID:  "service1",
+		ID:          "route1",
+		Priority:    100,
+		Host:        "example.com",
+		PathPrefix:  "/api",
+		ServiceID:   "service1",
 		Middlewares: []string{"auth", "ratelimit"},
 		Headers: map[string]string{
 			"X-API-Version": "v1",
@@ -580,7 +581,7 @@ func testWatchOperations(t *testing.T, setupFunc func(*testing.T) types.Storage)
 
 	// Test context cancellation
 	cancel()
-	
+
 	// Channel should be closed
 	select {
 	case _, ok := <-events:
@@ -632,7 +633,7 @@ func testConcurrentOperations(t *testing.T, setupFunc func(*testing.T) types.Sto
 	wg = sync.WaitGroup{}
 	for i := 0; i < numGoroutines; i++ {
 		wg.Add(2)
-		
+
 		// Reader goroutine
 		go func(goroutineID int) {
 			defer wg.Done()

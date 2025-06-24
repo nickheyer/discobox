@@ -4,12 +4,16 @@
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import ConfirmModal from '$lib/components/ConfirmModal.svelte';
+	import { toast } from '$lib/stores/toast';
 	import type { Service } from '$lib/types';
 	
 	let services = $state<Service[]>([]);
 	let loading = $state(true);
 	let showModal = $state(false);
 	let editingService = $state<Service | null>(null);
+	let deleteConfirmOpen = $state(false);
+	let serviceToDelete = $state<string | null>(null);
 	let formData = $state({
 		id: '',
 		name: '',
@@ -96,12 +100,28 @@
 		}
 	}
 	
-	async function deleteService(id: string) {
+	function requestDeleteService(id: string) {
+		serviceToDelete = id;
+		deleteConfirmOpen = true;
+	}
+	
+	async function deleteService() {
+		if (!serviceToDelete) return;
+		
 		try {
-			await api.deleteService(id);
+			await api.deleteService(serviceToDelete);
 			await loadServices();
-		} catch (error) {
+			toast.success('Service deleted successfully');
+		} catch (error: any) {
 			console.error('Failed to delete service:', error);
+			if (error.message?.includes('referenced by routes')) {
+				toast.error('Cannot delete service: It is referenced by one or more routes. Please remove the routes first.');
+			} else {
+				toast.error('Failed to delete service: ' + (error.message || 'Unknown error'));
+			}
+		} finally {
+			serviceToDelete = null;
+			deleteConfirmOpen = false;
 		}
 	}
 </script>
@@ -143,11 +163,11 @@
 							
 							<div class="grid gap-4 mt-4">
 								<div>
-									<p class="font-semibold mb-2">Endpoints:</p>
-									<div class="space-y-1">
+									<p class="text-sm font-semibold text-base-content/70 mb-2">Endpoints</p>
+									<div class="flex flex-wrap gap-2">
 										{#each service.endpoints || [] as endpoint}
-											<div class="badge badge-outline badge-sm font-mono max-w-full">
-												<span class="truncate" title={endpoint}>{endpoint}</span>
+											<div class="badge badge-outline font-mono text-xs">
+												{endpoint}
 											</div>
 										{/each}
 									</div>
@@ -175,7 +195,7 @@
 							
 							<div class="card-actions justify-end mt-4">
 								<button class="btn btn-sm btn-ghost" onclick={() => openModal(service)}>Edit</button>
-								<button class="btn btn-sm btn-ghost btn-error" onclick={() => deleteService(service.id)}>Delete</button>
+								<button class="btn btn-sm btn-ghost btn-error" onclick={() => requestDeleteService(service.id)}>Delete</button>
 							</div>
 						</div>
 					</div>
@@ -193,127 +213,147 @@
 	
 	<!-- Modal -->
 	<dialog class="modal" class:modal-open={showModal}>
-		<div class="modal-box max-w-2xl max-h-[90vh] overflow-y-auto">
-			<h3 class="font-bold text-lg mb-4">
+		<div class="modal-box max-w-3xl">
+			<h3 class="text-xl font-bold mb-6">
 				{editingService ? 'Edit Service' : 'Add Service'}
 			</h3>
 			
-			<div class="space-y-4">
-				<div class="form-control">
-					<label class="label" for="service-id">
-						<span class="label-text">Service ID</span>
-					</label>
-					<input
-						id="service-id"
-						type="text"
-						class="input input-bordered"
-						bind:value={formData.id}
-						placeholder="my-service"
-						disabled={!!editingService}
-					/>
-				</div>
-				
-				<div class="form-control">
-					<label class="label" for="service-name">
-						<span class="label-text">Name</span>
-					</label>
-					<input
-						id="service-name"
-						type="text"
-						class="input input-bordered"
-						bind:value={formData.name}
-						placeholder="My Service"
-					/>
-				</div>
-				
-				<div class="form-control">
-					<div class="label">
-						<span class="label-text">Endpoints</span>
-					</div>
-					{#each formData.endpoints as endpoint, i}
-						<div class="flex gap-2 mb-2">
+			<form class="space-y-6">
+				<!-- Basic Information -->
+				<div class="space-y-4">
+					<div class="divider text-sm">Basic Information</div>
+					
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend">Service ID</legend>
 							<input
 								type="text"
-								class="input input-bordered flex-1"
-								bind:value={formData.endpoints[i]}
-								placeholder="http://localhost:3000"
+								class="input"
+								bind:value={formData.id}
+								placeholder="my-service"
+								disabled={!!editingService}
 							/>
-							<button
-								class="btn btn-square btn-error"
-								onclick={() => removeEndpoint(i)}
-								disabled={formData.endpoints.length === 1}
-								aria-label="Remove endpoint"
-							>
+							<p class="label">Unique identifier</p>
+						</fieldset>
+						
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend">Name</legend>
+							<input
+								type="text"
+								class="input"
+								bind:value={formData.name}
+								placeholder="My Service"
+								required
+							/>
+							<p class="label">Display name</p>
+						</fieldset>
+					</div>
+				</div>
+				
+				<!-- Endpoints -->
+				<div class="space-y-4">
+					<div class="divider text-sm">Endpoints</div>
+					
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend">Backend Endpoints</legend>
+						<div class="space-y-2">
+							{#each formData.endpoints as endpoint, i}
+								<div class="flex gap-2">
+									<label class="input flex-1">
+										<svg class="h-[1em] opacity-50" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+											<g stroke-linejoin="round" stroke-linecap="round" stroke-width="2.5" fill="none" stroke="currentColor">
+												<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+												<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+											</g>
+										</svg>
+										<input
+											type="url"
+											class="grow"
+											bind:value={formData.endpoints[i]}
+											placeholder="http://localhost:3000"
+											required
+										/>
+									</label>
+									<button
+										type="button"
+										class="btn btn-square btn-outline btn-error"
+										onclick={() => removeEndpoint(i)}
+										disabled={formData.endpoints.length === 1}
+										aria-label="Remove endpoint"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+										</svg>
+									</button>
+								</div>
+							{/each}
+							<button type="button" class="btn btn-sm btn-outline gap-2" onclick={addEndpoint}>
 								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
 								</svg>
+								Add Endpoint
 							</button>
 						</div>
-					{/each}
-					<button class="btn btn-sm btn-ghost gap-2" onclick={addEndpoint}>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-						</svg>
-						Add Endpoint
-					</button>
+						<p class="label">At least one required</p>
+					</fieldset>
 				</div>
 				
-				<div class="grid grid-cols-2 gap-4">
-					<div class="form-control">
-						<label class="label" for="health-path">
-							<span class="label-text">Health Path</span>
-						</label>
-						<input
-							id="health-path"
-							type="text"
-							class="input input-bordered"
-							bind:value={formData.health_path}
-							placeholder="/health"
-						/>
-					</div>
+				<!-- Configuration -->
+				<div class="space-y-4">
+					<div class="divider text-sm">Configuration</div>
 					
-					<div class="form-control">
-						<label class="label" for="service-weight">
-							<span class="label-text">Weight</span>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<label class="input">
+							Health Path
+							<input
+								type="text"
+								class="grow"
+								bind:value={formData.health_path}
+								placeholder="/health"
+							/>
 						</label>
-						<input
-							id="service-weight"
-							type="number"
-							class="input input-bordered"
-							bind:value={formData.weight}
-							min="1"
-						/>
+						
+						<label class="input">
+							Timeout
+							<input
+								type="text"
+								class="grow"
+								bind:value={formData.timeout}
+								placeholder="30s"
+								pattern="[0-9]+[smh]"
+							/>
+						</label>
+						
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend">Weight</legend>
+							<input
+								type="number"
+								class="input"
+								bind:value={formData.weight}
+								min="1"
+								max="100"
+								placeholder="1-100"
+							/>
+							<p class="label">Load balancing weight (1-100)</p>
+						</fieldset>
+						
+						<div class="form-control">
+							<label class="label cursor-pointer justify-start gap-3">
+								<input
+									type="checkbox"
+									class="checkbox checkbox-primary"
+									bind:checked={formData.active}
+								/>
+								<span class="label-text">Service Active</span>
+							</label>
+						</div>
 					</div>
 				</div>
-				
-				<div class="form-control">
-					<label class="label" for="service-timeout">
-						<span class="label-text">Timeout</span>
-					</label>
-					<input
-						id="service-timeout"
-						type="text"
-						class="input input-bordered"
-						bind:value={formData.timeout}
-						placeholder="30s"
-					/>
-				</div>
-				
-				<div class="form-control">
-					<label class="label cursor-pointer">
-						<span class="label-text">Active</span>
-						<input
-							type="checkbox"
-							class="toggle toggle-primary"
-							bind:checked={formData.active}
-						/>
-					</label>
-				</div>
-			</div>
+			</form>
 			
 			<div class="modal-action">
-				<button class="btn" onclick={closeModal}>Cancel</button>
-				<button class="btn btn-primary" onclick={saveService}>Save</button>
+				<button class="btn btn-ghost" onclick={closeModal}>Cancel</button>
+				<button class="btn btn-primary" onclick={saveService}>Save Service</button>
 			</div>
 		</div>
 		<form method="dialog" class="modal-backdrop">
@@ -321,3 +361,14 @@
 		</form>
 	</dialog>
 {/if}
+
+<ConfirmModal
+	bind:open={deleteConfirmOpen}
+	title="Delete Service"
+	message="Are you sure you want to delete this service? This action cannot be undone."
+	confirmText="Delete"
+	cancelText="Cancel"
+	dangerous={true}
+	onConfirm={deleteService}
+	onCancel={() => serviceToDelete = null}
+/>

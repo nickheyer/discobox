@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"net"
 	"time"
-	
-	"net/http"
-	"discobox/internal/types"
 
+	"discobox/internal/types"
+	"net/http"
 )
 
 // loggingResponseWriter captures response details for logging
@@ -46,25 +45,25 @@ func AccessLogging(logger types.Logger) types.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			
+
 			// Wrap response writer
 			lrw := &loggingResponseWriter{
 				ResponseWriter: w,
 				started:        start,
 			}
-			
+
 			// Get request details
 			path := r.URL.Path
 			if r.URL.RawQuery != "" {
 				path = path + "?" + r.URL.RawQuery
 			}
-			
+
 			// Process request
 			next.ServeHTTP(lrw, r)
-			
+
 			// Log the request
 			duration := time.Since(start)
-			
+
 			logger.Info("request",
 				"method", r.Method,
 				"path", path,
@@ -82,23 +81,23 @@ func AccessLogging(logger types.Logger) types.Middleware {
 // StructuredLogger provides structured logging with context
 type StructuredLogger struct {
 	logger types.Logger
-	fields []interface{}
+	fields []any
 }
 
 // NewStructuredLogger creates a structured logger
 func NewStructuredLogger(logger types.Logger) *StructuredLogger {
 	return &StructuredLogger{
 		logger: logger,
-		fields: make([]interface{}, 0),
+		fields: make([]any, 0),
 	}
 }
 
 // With adds fields to the logger
-func (sl *StructuredLogger) With(fields ...interface{}) *StructuredLogger {
-	newFields := make([]interface{}, len(sl.fields)+len(fields))
+func (sl *StructuredLogger) With(fields ...any) *StructuredLogger {
+	newFields := make([]any, len(sl.fields)+len(fields))
 	copy(newFields, sl.fields)
 	copy(newFields[len(sl.fields):], fields)
-	
+
 	return &StructuredLogger{
 		logger: sl.logger,
 		fields: newFields,
@@ -110,17 +109,17 @@ func (sl *StructuredLogger) Middleware() types.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			
+
 			// Generate request ID if not present
 			requestID := r.Header.Get("X-Request-ID")
 			if requestID == "" {
 				requestID = generateRequestID()
 				r.Header.Set("X-Request-ID", requestID)
 			}
-			
+
 			// Add request ID to response
 			w.Header().Set("X-Request-ID", requestID)
-			
+
 			// Create logger with request context
 			reqLogger := sl.With(
 				"request_id", requestID,
@@ -128,19 +127,19 @@ func (sl *StructuredLogger) Middleware() types.Middleware {
 				"path", r.URL.Path,
 				"remote_addr", r.RemoteAddr,
 			)
-			
+
 			// Log request start
 			reqLogger.logger.Debug("request started", reqLogger.fields...)
-			
+
 			// Wrap response writer
 			lrw := &loggingResponseWriter{
 				ResponseWriter: w,
 				started:        start,
 			}
-			
+
 			// Process request
 			next.ServeHTTP(lrw, r)
-			
+
 			// Log request completion
 			duration := time.Since(start)
 			fields := append(reqLogger.fields,
@@ -148,7 +147,7 @@ func (sl *StructuredLogger) Middleware() types.Middleware {
 				"duration_ms", duration.Milliseconds(),
 				"bytes", lrw.bytes,
 			)
-			
+
 			// Log based on status code
 			if lrw.statusCode >= 500 {
 				reqLogger.logger.Error("request failed", fields...)
@@ -168,18 +167,18 @@ func RequestLogger(logger types.Logger) types.Middleware {
 			// Add logger to request context
 			ctx := r.Context()
 			ctx = ContextWithLogger(ctx, logger)
-			
+
 			// Add request ID if not present
 			requestID := r.Header.Get("X-Request-ID")
 			if requestID == "" {
 				requestID = generateRequestID()
 				r.Header.Set("X-Request-ID", requestID)
 			}
-			
+
 			// Create request-specific logger
 			reqLogger := logger.With("request_id", requestID)
 			ctx = ContextWithLogger(ctx, reqLogger)
-			
+
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

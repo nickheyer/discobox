@@ -16,6 +16,7 @@ import (
 
 	"discobox/internal/proxy"
 	"discobox/internal/types"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,8 +49,8 @@ func (m *mockLoadBalancer) Select(ctx context.Context, req *http.Request, server
 	return nil, types.ErrNoHealthyBackends
 }
 
-func (m *mockLoadBalancer) Add(server *types.Server) error               { return nil }
-func (m *mockLoadBalancer) Remove(serverID string) error                 { return nil }
+func (m *mockLoadBalancer) Add(server *types.Server) error                 { return nil }
+func (m *mockLoadBalancer) Remove(serverID string) error                   { return nil }
 func (m *mockLoadBalancer) UpdateWeight(serverID string, weight int) error { return nil }
 
 type mockHealthChecker struct {
@@ -89,7 +90,7 @@ func (m *mockCircuitBreaker) Execute(fn func() error) error {
 }
 
 func (m *mockCircuitBreaker) State() string { return "closed" }
-func (m *mockCircuitBreaker) Reset() {}
+func (m *mockCircuitBreaker) Reset()        {}
 
 type mockStorage struct {
 	services map[string]*types.Service
@@ -134,31 +135,40 @@ func (m *mockStorage) DeleteService(ctx context.Context, id string) error {
 func (m *mockStorage) GetRoute(ctx context.Context, id string) (*types.Route, error) {
 	return nil, types.ErrRouteNotFound
 }
-func (m *mockStorage) ListRoutes(ctx context.Context) ([]*types.Route, error) { return nil, nil }
-func (m *mockStorage) CreateRoute(ctx context.Context, route *types.Route) error { return nil }
-func (m *mockStorage) UpdateRoute(ctx context.Context, route *types.Route) error { return nil }
-func (m *mockStorage) DeleteRoute(ctx context.Context, id string) error { return nil }
+func (m *mockStorage) ListRoutes(ctx context.Context) ([]*types.Route, error)      { return nil, nil }
+func (m *mockStorage) CreateRoute(ctx context.Context, route *types.Route) error   { return nil }
+func (m *mockStorage) UpdateRoute(ctx context.Context, route *types.Route) error   { return nil }
+func (m *mockStorage) DeleteRoute(ctx context.Context, id string) error            { return nil }
 func (m *mockStorage) GetUser(ctx context.Context, id string) (*types.User, error) { return nil, nil }
-func (m *mockStorage) GetUserByEmail(ctx context.Context, email string) (*types.User, error) { return nil, nil }
-func (m *mockStorage) GetUserByUsername(ctx context.Context, username string) (*types.User, error) { return nil, nil }
-func (m *mockStorage) ListUsers(ctx context.Context) ([]*types.User, error) { return nil, nil }
+func (m *mockStorage) GetUserByEmail(ctx context.Context, email string) (*types.User, error) {
+	return nil, nil
+}
+func (m *mockStorage) GetUserByUsername(ctx context.Context, username string) (*types.User, error) {
+	return nil, nil
+}
+func (m *mockStorage) ListUsers(ctx context.Context) ([]*types.User, error)   { return nil, nil }
 func (m *mockStorage) CreateUser(ctx context.Context, user *types.User) error { return nil }
 func (m *mockStorage) UpdateUser(ctx context.Context, user *types.User) error { return nil }
-func (m *mockStorage) DeleteUser(ctx context.Context, id string) error { return nil }
-func (m *mockStorage) GetAPIKey(ctx context.Context, key string) (*types.APIKey, error) { return nil, nil }
+func (m *mockStorage) DeleteUser(ctx context.Context, id string) error        { return nil }
+func (m *mockStorage) GetAPIKey(ctx context.Context, key string) (*types.APIKey, error) {
+	return nil, nil
+}
 func (m *mockStorage) ListAPIKeys(ctx context.Context) ([]*types.APIKey, error) { return nil, nil }
-func (m *mockStorage) ListAPIKeysByUser(ctx context.Context, userID string) ([]*types.APIKey, error) { return nil, nil }
+func (m *mockStorage) ListAPIKeysByUser(ctx context.Context, userID string) ([]*types.APIKey, error) {
+	return nil, nil
+}
 func (m *mockStorage) CreateAPIKey(ctx context.Context, apiKey *types.APIKey) error { return nil }
-func (m *mockStorage) RevokeAPIKey(ctx context.Context, key string) error { return nil }
-func (m *mockStorage) Watch(ctx context.Context) <-chan types.StorageEvent { return nil }
-func (m *mockStorage) Close() error { return nil }
+func (m *mockStorage) RevokeAPIKey(ctx context.Context, key string) error           { return nil }
+func (m *mockStorage) Watch(ctx context.Context) <-chan types.StorageEvent          { return nil }
+func (m *mockStorage) Close() error                                                 { return nil }
 
 type testLogger struct{}
-func (l *testLogger) Debug(msg string, fields ...interface{}) {}
-func (l *testLogger) Info(msg string, fields ...interface{})  {}
-func (l *testLogger) Warn(msg string, fields ...interface{})  {}
-func (l *testLogger) Error(msg string, fields ...interface{}) {}
-func (l *testLogger) With(fields ...interface{}) types.Logger { return l }
+
+func (l *testLogger) Debug(msg string, fields ...any) {}
+func (l *testLogger) Info(msg string, fields ...any)  {}
+func (l *testLogger) Warn(msg string, fields ...any)  {}
+func (l *testLogger) Error(msg string, fields ...any) {}
+func (l *testLogger) With(fields ...any) types.Logger { return l }
 
 // Helper functions
 func createTestBackend(handler http.HandlerFunc) *httptest.Server {
@@ -593,11 +603,11 @@ func TestProxyTimeout(t *testing.T) {
 func TestProxyConcurrency(t *testing.T) {
 	var activeRequests int32
 	var maxConcurrent int32
-	
+
 	backend := createTestBackend(func(w http.ResponseWriter, r *http.Request) {
 		current := atomic.AddInt32(&activeRequests, 1)
 		defer atomic.AddInt32(&activeRequests, -1)
-		
+
 		// Update max concurrent
 		for {
 			max := atomic.LoadInt32(&maxConcurrent)
@@ -605,7 +615,7 @@ func TestProxyConcurrency(t *testing.T) {
 				break
 			}
 		}
-		
+
 		time.Sleep(10 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "Request %d", current)
@@ -655,7 +665,7 @@ func TestProxyConcurrency(t *testing.T) {
 	// Make concurrent requests
 	var wg sync.WaitGroup
 	numRequests := 50
-	
+
 	for i := 0; i < numRequests; i++ {
 		wg.Add(1)
 		go func() {
@@ -666,9 +676,9 @@ func TestProxyConcurrency(t *testing.T) {
 			assert.Equal(t, http.StatusOK, rec.Code)
 		}()
 	}
-	
+
 	wg.Wait()
-	
+
 	// Verify concurrency was achieved
 	assert.Greater(t, atomic.LoadInt32(&maxConcurrent), int32(1))
 }
@@ -771,7 +781,7 @@ func TestProxyWebSocketUpgrade(t *testing.T) {
 			http.Error(w, "Expected WebSocket", http.StatusBadRequest)
 			return
 		}
-		
+
 		w.Header().Set("Upgrade", "websocket")
 		w.Header().Set("Connection", "Upgrade")
 		w.Header().Set("Sec-WebSocket-Accept", "test-accept")
@@ -824,7 +834,7 @@ func TestProxyWebSocketUpgrade(t *testing.T) {
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Sec-WebSocket-Version", "13")
 	req.Header.Set("Sec-WebSocket-Key", "test-key")
-	
+
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, req)
 
@@ -945,10 +955,10 @@ func TestProxyInactiveService(t *testing.T) {
 func TestProxyHealthRecording(t *testing.T) {
 	// Test both success and failure scenarios
 	testCases := []struct {
-		name           string
-		backendStatus  int
-		expectSuccess  bool
-		expectFailure  bool
+		name          string
+		backendStatus int
+		expectSuccess bool
+		expectFailure bool
 	}{
 		{
 			name:          "Successful request",
@@ -969,7 +979,7 @@ func TestProxyHealthRecording(t *testing.T) {
 			expectFailure: false, // 4xx errors don't record failure
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			backend := createTestBackend(func(w http.ResponseWriter, r *http.Request) {
@@ -1035,7 +1045,7 @@ func TestProxyHealthRecording(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://example.com/api/test", nil)
 			rec := httptest.NewRecorder()
 			p.ServeHTTP(rec, req)
-			
+
 			assert.Equal(t, tc.backendStatus, rec.Code)
 			assert.Equal(t, tc.expectSuccess, recordedSuccess, "Expected success recording: %v, got: %v", tc.expectSuccess, recordedSuccess)
 			assert.Equal(t, tc.expectFailure, recordedFailure, "Expected failure recording: %v, got: %v", tc.expectFailure, recordedFailure)

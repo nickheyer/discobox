@@ -8,10 +8,10 @@ import (
 
 // Logger interface for API logging
 type Logger interface {
-	Debug(msg string, fields ...interface{})
-	Info(msg string, fields ...interface{})
-	Warn(msg string, fields ...interface{})
-	Error(msg string, fields ...interface{})
+	Debug(msg string, fields ...any)
+	Info(msg string, fields ...any)
+	Warn(msg string, fields ...any)
+	Error(msg string, fields ...any)
 }
 
 // AuthConfig holds authentication configuration
@@ -30,18 +30,18 @@ type AuthConfig struct {
 func WithMiddleware(handler http.Handler, logger Logger, authConfig *AuthConfig) http.Handler {
 	// Add CORS headers
 	handler = corsMiddleware(handler)
-	
+
 	// Add JSON content type
 	handler = jsonMiddleware(handler)
-	
+
 	// Add request logging
 	handler = loggingMiddleware(handler, logger)
-	
+
 	// Add authentication if needed
 	if authConfig != nil && authConfig.Enabled {
 		handler = authMiddleware(handler, authConfig)
 	}
-	
+
 	return handler
 }
 
@@ -51,12 +51,12 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -91,13 +91,13 @@ func authMiddleware(next http.Handler, config *AuthConfig) http.Handler {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
-			
+
 		case "bearer":
 			if !checkBearerToken(r, config.Token) {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
-			
+
 		case "api-key":
 			headerName := config.HeaderName
 			if headerName == "" {
@@ -108,13 +108,13 @@ func authMiddleware(next http.Handler, config *AuthConfig) http.Handler {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
-			
+
 		default:
 			// Unknown auth type, deny access
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -125,11 +125,11 @@ func checkBasicAuth(r *http.Request, username, password string) bool {
 	if !ok {
 		return false
 	}
-	
+
 	// Use constant time comparison to prevent timing attacks
 	userMatch := subtle.ConstantTimeCompare([]byte(user), []byte(username))
 	passMatch := subtle.ConstantTimeCompare([]byte(pass), []byte(password))
-	
+
 	return userMatch == 1 && passMatch == 1
 }
 
@@ -139,12 +139,12 @@ func checkBearerToken(r *http.Request, expectedToken string) bool {
 	if auth == "" {
 		return false
 	}
-	
+
 	const prefix = "Bearer "
 	if !strings.HasPrefix(auth, prefix) {
 		return false
 	}
-	
+
 	token := auth[len(prefix):]
 	return subtle.ConstantTimeCompare([]byte(token), []byte(expectedToken)) == 1
 }
@@ -156,6 +156,6 @@ func checkAPIKey(r *http.Request, expectedKey string, headerName string) bool {
 		// Also check query parameter as fallback
 		key = r.URL.Query().Get("api_key")
 	}
-	
+
 	return subtle.ConstantTimeCompare([]byte(key), []byte(expectedKey)) == 1
 }

@@ -79,14 +79,14 @@ type Storage interface {
 	CreateService(ctx context.Context, service *Service) error
 	UpdateService(ctx context.Context, service *Service) error
 	DeleteService(ctx context.Context, id string) error
-	
+
 	// Routes
 	GetRoute(ctx context.Context, id string) (*Route, error)
 	ListRoutes(ctx context.Context) ([]*Route, error)
 	CreateRoute(ctx context.Context, route *Route) error
 	UpdateRoute(ctx context.Context, route *Route) error
 	DeleteRoute(ctx context.Context, id string) error
-	
+
 	// Users
 	GetUser(ctx context.Context, id string) (*User, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
@@ -94,16 +94,16 @@ type Storage interface {
 	CreateUser(ctx context.Context, user *User) error
 	UpdateUser(ctx context.Context, user *User) error
 	DeleteUser(ctx context.Context, id string) error
-	
+
 	// API Keys
 	GetAPIKey(ctx context.Context, key string) (*APIKey, error)
 	ListAPIKeysByUser(ctx context.Context, userID string) ([]*APIKey, error)
 	CreateAPIKey(ctx context.Context, apiKey *APIKey) error
 	RevokeAPIKey(ctx context.Context, key string) error
-	
+
 	// Watch for changes
 	Watch(ctx context.Context) <-chan StorageEvent
-	
+
 	// Close closes the storage
 	Close() error
 }
@@ -133,9 +133,9 @@ type MetricsCollector interface {
 
 // Logger provides structured logging
 type Logger interface {
-	Debug(msg string, fields ...interface{})
-	Info(msg string, fields ...interface{})
-	Warn(msg string, fields ...interface{})
-	Error(msg string, fields ...interface{})
-	With(fields ...interface{}) Logger
+	Debug(msg string, fields ...any)
+	Info(msg string, fields ...any)
+	Warn(msg string, fields ...any)
+	Error(msg string, fields ...any)
+	With(fields ...any) Logger
 }

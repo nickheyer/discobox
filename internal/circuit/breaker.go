@@ -9,7 +9,6 @@ import (
 	"github.com/sony/gobreaker"
 )
 
-
 // circuitBreaker implements the CircuitBreaker interface using sony/gobreaker
 type circuitBreaker struct {
 	breaker *gobreaker.CircuitBreaker
@@ -31,7 +30,7 @@ func NewCircuitBreaker(failureThreshold, successThreshold int, timeout time.Dura
 			// Log state changes if needed
 		},
 	}
-	
+
 	return &circuitBreaker{
 		breaker: gobreaker.NewCircuitBreaker(settings),
 	}
@@ -39,14 +38,14 @@ func NewCircuitBreaker(failureThreshold, successThreshold int, timeout time.Dura
 
 // Execute runs the function with circuit breaker protection
 func (cb *circuitBreaker) Execute(fn func() error) error {
-	_, err := cb.breaker.Execute(func() (interface{}, error) {
+	_, err := cb.breaker.Execute(func() (any, error) {
 		return nil, fn()
 	})
-	
+
 	if err == gobreaker.ErrOpenState {
 		return types.ErrCircuitBreakerOpen
 	}
-	
+
 	return err
 }
 
@@ -69,7 +68,7 @@ func (cb *circuitBreaker) State() string {
 func (cb *circuitBreaker) Reset() {
 	// gobreaker doesn't have a direct reset method, so we simulate it
 	// by executing a successful operation
-	cb.breaker.Execute(func() (interface{}, error) {
+	cb.breaker.Execute(func() (any, error) {
 		return nil, nil
 	})
 }
@@ -101,26 +100,26 @@ func (m *MultiCircuitBreaker) GetBreaker(serviceID string) types.CircuitBreaker 
 	m.mu.RLock()
 	breaker, exists := m.breakers[serviceID]
 	m.mu.RUnlock()
-	
+
 	if exists {
 		return breaker
 	}
-	
+
 	// Create new breaker
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	// Double-check after acquiring write lock
 	if breaker, exists := m.breakers[serviceID]; exists {
 		return breaker
 	}
-	
+
 	breaker = NewCircuitBreaker(
 		m.settings.FailureThreshold,
 		m.settings.SuccessThreshold,
 		m.settings.Timeout,
 	)
-	
+
 	m.breakers[serviceID] = breaker
 	return breaker
 }
@@ -136,12 +135,12 @@ func (m *MultiCircuitBreaker) RemoveBreaker(serviceID string) {
 func (m *MultiCircuitBreaker) GetAllStates() map[string]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	states := make(map[string]string)
 	for id, breaker := range m.breakers {
 		states[id] = breaker.State()
 	}
-	
+
 	return states
 }
 
@@ -149,7 +148,7 @@ func (m *MultiCircuitBreaker) GetAllStates() map[string]string {
 func (m *MultiCircuitBreaker) ResetAll() {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	for _, breaker := range m.breakers {
 		breaker.Reset()
 	}

@@ -40,7 +40,7 @@ type Route struct {
 	ServiceID    string                 `json:"service_id" yaml:"service_id"`
 	Middlewares  []string               `json:"middlewares" yaml:"middlewares"`
 	RewriteRules []RewriteRule          `json:"rewrite_rules,omitempty" yaml:"rewrite_rules,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // RewriteRule defines URL rewriting rules
@@ -160,7 +160,7 @@ type StorageEvent struct {
 	Type   string // created, updated, deleted
 	Kind   string // service, route
 	ID     string
-	Object interface{}
+	Object any
 }
 
 // Middleware wraps HTTP handlers
@@ -188,11 +188,11 @@ type MetricsCollector interface {
 
 // Logger provides structured logging
 type Logger interface {
-	Debug(msg string, fields ...interface{})
-	Info(msg string, fields ...interface{})
-	Warn(msg string, fields ...interface{})
-	Error(msg string, fields ...interface{})
-	With(fields ...interface{}) Logger
+	Debug(msg string, fields ...any)
+	Info(msg string, fields ...any)
+	Warn(msg string, fields ...any)
+	Error(msg string, fields ...any)
+	With(fields ...any) Logger
 }
 
 // ProxyConfig represents the complete proxy configuration

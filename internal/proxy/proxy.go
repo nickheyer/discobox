@@ -76,7 +76,7 @@ func New(opts Options) *Proxy {
 		modifyResponse: opts.ModifyResponse,
 		bufferPool: &BufferPool{
 			pool: &sync.Pool{
-				New: func() interface{} {
+				New: func() any {
 					return make([]byte, 32*1024) // 32KB buffers
 				},
 			},
@@ -94,6 +94,16 @@ func New(opts Options) *Proxy {
 	}
 
 	return p
+}
+
+// UpdateLoadBalancer updates the load balancer at runtime
+func (p *Proxy) UpdateLoadBalancer(lb types.LoadBalancer) {
+	p.loadBalancer = lb
+}
+
+// UpdateCircuitBreaker updates the circuit breaker at runtime
+func (p *Proxy) UpdateCircuitBreaker(cb types.CircuitBreaker) {
+	p.circuitBreaker = cb
 }
 
 // ServeHTTP handles incoming requests
@@ -194,7 +204,7 @@ func (p *Proxy) createReverseProxy(server *types.Server, service *types.Service,
 			p.defaultErrorHandler(w, r, err, http.StatusBadGateway)
 		}
 	}
-	
+
 	// Create response modifier that records success
 	modifyResponse := func(resp *http.Response) error {
 		// Record success for 2xx and 3xx responses
@@ -204,14 +214,14 @@ func (p *Proxy) createReverseProxy(server *types.Server, service *types.Service,
 			// Record failure for 5xx responses
 			p.healthChecker.RecordFailure(server.ID, fmt.Errorf("backend returned %d", resp.StatusCode))
 		}
-		
+
 		// Call the original modifier if present
 		if p.modifyResponse != nil {
 			return p.modifyResponse(resp)
 		}
 		return nil
 	}
-	
+
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = server.URL.Scheme
@@ -269,16 +279,16 @@ func (p *Proxy) getService(ctx context.Context, serviceID string) (*types.Servic
 	if p.storage == nil {
 		return nil, fmt.Errorf("storage not configured")
 	}
-	
+
 	service, err := p.storage.GetService(ctx, serviceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service %s: %w", serviceID, err)
 	}
-	
+
 	if !service.Active {
 		return nil, fmt.Errorf("service %s is not active", serviceID)
 	}
-	
+
 	return service, nil
 }
 
@@ -331,7 +341,7 @@ func (p *Proxy) handleError(w http.ResponseWriter, r *http.Request, err error, s
 // defaultErrorHandler is the default error handler
 func (p *Proxy) defaultErrorHandler(w http.ResponseWriter, r *http.Request, err error, suggestedStatus int) {
 	statusCode := suggestedStatus
-	
+
 	// Override with specific error codes if we recognize the error
 	switch {
 	case errors.Is(err, types.ErrRouteNotFound):

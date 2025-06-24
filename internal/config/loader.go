@@ -6,10 +6,11 @@ import (
 	"os"
 	"strings"
 	"time"
-	
-	"github.com/spf13/viper"
+
 	"path/filepath"
-	
+
+	"github.com/spf13/viper"
+
 	"discobox/internal/types"
 )
 
@@ -40,15 +41,15 @@ func (l *Loader) LoadConfig() (*types.ProxyConfig, error) {
 		viper.AddConfigPath("/etc/discobox/")
 		viper.AddConfigPath("$HOME/.discobox")
 	}
-	
+
 	// Enable environment variables
 	viper.SetEnvPrefix("DISCOBOX")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
-	
+
 	// Set defaults
 	setDefaults()
-	
+
 	// Read configuration
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
@@ -59,44 +60,44 @@ func (l *Loader) LoadConfig() (*types.ProxyConfig, error) {
 	} else {
 		l.logger.Info("Loaded configuration", "file", viper.ConfigFileUsed())
 	}
-	
+
 	// Unmarshal configuration
 	var cfg types.ProxyConfig
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	
+
 	// Validate configuration
 	if err := Validate(&cfg); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
-	
+
 	return &cfg, nil
 }
 
 // LoadFromBytes loads configuration from byte array (for testing)
 func LoadFromBytes(data []byte, format string) (*types.ProxyConfig, error) {
 	viper.SetConfigType(format)
-	
+
 	// Set defaults
 	setDefaults()
-	
+
 	// Read from bytes
 	if err := viper.ReadConfig(strings.NewReader(string(data))); err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
-	
+
 	// Unmarshal configuration
 	var cfg types.ProxyConfig
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	
+
 	// Validate configuration
 	if err := Validate(&cfg); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
-	
+
 	return &cfg, nil
 }
 
@@ -106,18 +107,28 @@ func (l *Loader) SaveConfig(cfg *types.ProxyConfig) error {
 	if err := Validate(cfg); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
-	
+
 	// Ensure directory exists
 	dir := filepath.Dir(l.configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-	
+
+	// Update viper values with the new configuration
+	viper.Set("load_balancing.algorithm", cfg.LoadBalancing.Algorithm)
+	viper.Set("rate_limit.enabled", cfg.RateLimit.Enabled)
+	viper.Set("rate_limit.rps", cfg.RateLimit.RPS)
+	viper.Set("rate_limit.burst", cfg.RateLimit.Burst)
+	viper.Set("circuit_breaker.enabled", cfg.CircuitBreaker.Enabled)
+	viper.Set("circuit_breaker.failure_threshold", cfg.CircuitBreaker.FailureThreshold)
+	viper.Set("circuit_breaker.success_threshold", cfg.CircuitBreaker.SuccessThreshold)
+	viper.Set("circuit_breaker.timeout", cfg.CircuitBreaker.Timeout.String())
+
 	// Write configuration
 	if err := viper.WriteConfigAs(l.configPath); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
-	
+
 	l.logger.Info("Saved configuration", "file", l.configPath)
 	return nil
 }
@@ -125,25 +136,25 @@ func (l *Loader) SaveConfig(cfg *types.ProxyConfig) error {
 // LoadBootstrapData loads services, routes, and users from configuration file for bootstrapping
 func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 	ctx := context.Background()
-	
+
 	// Bootstrap admin user first
 	if err := l.bootstrapAdminUser(storage); err != nil {
 		l.logger.Error("failed to bootstrap admin user", "error", err)
 	}
-	
+
 	// Check if we have services defined in config
 	servicesRaw := viper.Get("services")
 	if servicesRaw != nil {
-		services, ok := servicesRaw.([]interface{})
+		services, ok := servicesRaw.([]any)
 		if ok {
 			for _, svcRaw := range services {
-				svcMap, ok := svcRaw.(map[string]interface{})
+				svcMap, ok := svcRaw.(map[string]any)
 				if !ok {
 					continue
 				}
-				
+
 				service := &types.Service{}
-				
+
 				// Parse service fields
 				if id, ok := svcMap["id"].(string); ok {
 					service.ID = id
@@ -151,16 +162,16 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 				if name, ok := svcMap["name"].(string); ok {
 					service.Name = name
 				}
-				
+
 				// Parse endpoints
-				if endpointsRaw, ok := svcMap["endpoints"].([]interface{}); ok {
+				if endpointsRaw, ok := svcMap["endpoints"].([]any); ok {
 					for _, ep := range endpointsRaw {
 						if endpoint, ok := ep.(string); ok {
 							service.Endpoints = append(service.Endpoints, endpoint)
 						}
 					}
 				}
-				
+
 				if healthPath, ok := svcMap["health_path"].(string); ok {
 					service.HealthPath = healthPath
 				}
@@ -176,16 +187,16 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 				if active, ok := svcMap["active"].(bool); ok {
 					service.Active = active
 				}
-				
+
 				// Parse timeout
 				if timeoutStr, ok := svcMap["timeout"].(string); ok {
 					if duration, err := time.ParseDuration(timeoutStr); err == nil {
 						service.Timeout = duration
 					}
 				}
-				
+
 				// Parse metadata
-				if metadataRaw, ok := svcMap["metadata"].(map[string]interface{}); ok {
+				if metadataRaw, ok := svcMap["metadata"].(map[string]any); ok {
 					service.Metadata = make(map[string]string)
 					for k, v := range metadataRaw {
 						if strVal, ok := v.(string); ok {
@@ -193,7 +204,7 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 						}
 					}
 				}
-				
+
 				// Check if service exists
 				if _, err := storage.GetService(ctx, service.ID); err != nil {
 					// Service doesn't exist, create it
@@ -206,20 +217,20 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 			}
 		}
 	}
-	
+
 	// Check if we have routes defined in config
 	routesRaw := viper.Get("routes")
 	if routesRaw != nil {
-		routes, ok := routesRaw.([]interface{})
+		routes, ok := routesRaw.([]any)
 		if ok {
 			for _, routeRaw := range routes {
-				routeMap, ok := routeRaw.(map[string]interface{})
+				routeMap, ok := routeRaw.(map[string]any)
 				if !ok {
 					continue
 				}
-				
+
 				route := &types.Route{}
-				
+
 				// Parse route fields
 				if id, ok := routeMap["id"].(string); ok {
 					route.ID = id
@@ -236,21 +247,21 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 				if serviceID, ok := routeMap["service_id"].(string); ok {
 					route.ServiceID = serviceID
 				}
-				
+
 				// Parse middlewares
-				if middlewaresRaw, ok := routeMap["middlewares"].([]interface{}); ok {
+				if middlewaresRaw, ok := routeMap["middlewares"].([]any); ok {
 					for _, mw := range middlewaresRaw {
 						if middleware, ok := mw.(string); ok {
 							route.Middlewares = append(route.Middlewares, middleware)
 						}
 					}
 				}
-				
+
 				// Parse metadata
-				if metadataRaw, ok := routeMap["metadata"].(map[string]interface{}); ok {
+				if metadataRaw, ok := routeMap["metadata"].(map[string]any); ok {
 					route.Metadata = metadataRaw
 				}
-				
+
 				// Check if route exists
 				if _, err := storage.GetRoute(ctx, route.ID); err != nil {
 					// Route doesn't exist, create it
@@ -263,32 +274,32 @@ func (l *Loader) LoadBootstrapData(storage types.Storage) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
 // bootstrapAdminUser creates an admin user if none exists
 func (l *Loader) bootstrapAdminUser(storage types.Storage) error {
 	ctx := context.Background()
-	
+
 	// Check if any users exist
 	users, err := storage.ListUsers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list users: %w", err)
 	}
-	
+
 	// If users exist, skip bootstrap
 	if len(users) > 0 {
 		l.logger.Info("Users already exist, skipping admin bootstrap")
 		return nil
 	}
-	
+
 	// Create admin user
 	adminUsername := viper.GetString("admin.username")
 	if adminUsername == "" {
 		adminUsername = "admin"
 	}
-	
+
 	adminPassword := viper.GetString("admin.password")
 	if adminPassword == "" {
 		// Generate a random password if not specified
@@ -296,13 +307,13 @@ func (l *Loader) bootstrapAdminUser(storage types.Storage) error {
 		l.logger.Warn("No admin password specified, generated random password", "username", adminUsername, "password", adminPassword)
 		l.logger.Warn("IMPORTANT: Please change this password immediately after first login!")
 	}
-	
+
 	// Hash password
 	hashedPassword, err := hashPassword(adminPassword)
 	if err != nil {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
-	
+
 	// Create admin user
 	adminUser := &types.User{
 		ID:                 generateID("user"),
@@ -318,12 +329,12 @@ func (l *Loader) bootstrapAdminUser(storage types.Storage) error {
 			"created_by": "bootstrap",
 		},
 	}
-	
+
 	if err := storage.CreateUser(ctx, adminUser); err != nil {
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
-	
+
 	l.logger.Info("Created bootstrap admin user", "username", adminUsername, "must_change_password", true)
-	
+
 	return nil
 }

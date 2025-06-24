@@ -4,11 +4,12 @@ import (
 	"io"
 	"strings"
 	"sync"
-	
+
 	"compress/gzip"
+	"net/http"
+
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
-	"net/http"
 
 	"discobox/internal/types"
 )
@@ -30,19 +31,19 @@ func (cw *compressionWriter) Close() error {
 // Compression creates compression middleware
 func Compression(config types.ProxyConfig) types.Middleware {
 	cfg := config.Middleware.Compression
-	
+
 	// Create set of compressible types
 	compressibleTypes := make(map[string]bool)
 	for _, t := range cfg.Types {
 		compressibleTypes[t] = true
 	}
-	
+
 	// Create set of enabled algorithms
 	enabledAlgorithms := make(map[string]bool)
 	for _, algo := range cfg.Algorithms {
 		enabledAlgorithms[algo] = true
 	}
-	
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Check if client accepts compression
@@ -51,11 +52,11 @@ func Compression(config types.ProxyConfig) types.Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Determine best encoding
 			var encoding string
 			var writer io.WriteCloser
-			
+
 			// Priority order: br, zstd, gzip
 			if strings.Contains(acceptEncoding, "br") && enabledAlgorithms["br"] {
 				encoding = "br"
@@ -69,29 +70,29 @@ func Compression(config types.ProxyConfig) types.Middleware {
 				gzWriter, _ := gzip.NewWriterLevel(w, cfg.Level)
 				writer = gzWriter
 			}
-			
+
 			if writer == nil {
 				next.ServeHTTP(w, r)
 				return
 			}
-			
+
 			// Wrap response writer
 			w.Header().Set("Content-Encoding", encoding)
 			w.Header().Del("Content-Length") // Remove content length as it will change
-			
+
 			cw := &compressionWriter{
 				ResponseWriter: w,
 				writer:         writer,
 			}
 			defer cw.Close()
-			
+
 			// Capture response to check content type
 			rw := &responseWriter{
 				ResponseWriter: cw,
 				compressible:   compressibleTypes,
 				shouldCompress: false,
 			}
-			
+
 			next.ServeHTTP(rw, r)
 		})
 	}
@@ -114,7 +115,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 				contentType = contentType[:idx]
 			}
 			contentType = strings.TrimSpace(contentType)
-			
+
 			// Check if type is compressible
 			rw.shouldCompress = rw.compressible[contentType]
 		}
@@ -127,16 +128,16 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	if !rw.wroteHeader {
 		rw.WriteHeader(http.StatusOK)
 	}
-	
+
 	if rw.shouldCompress {
 		return rw.ResponseWriter.Write(b)
 	}
-	
+
 	// Write directly without compression
 	if cw, ok := rw.ResponseWriter.(*compressionWriter); ok {
 		return cw.ResponseWriter.Write(b)
 	}
-	
+
 	return rw.ResponseWriter.Write(b)
 }
 
@@ -153,18 +154,18 @@ func NewCompressionPool(level int) *CompressionPool {
 	return &CompressionPool{
 		level: level,
 		gzipPool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				w, _ := gzip.NewWriterLevel(nil, level)
 				return w
 			},
 		},
 		brPool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return brotli.NewWriterLevel(nil, level)
 			},
 		},
 		zstdPool: &sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				encoder, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.EncoderLevelFromZstd(level)))
 				return encoder
 			},

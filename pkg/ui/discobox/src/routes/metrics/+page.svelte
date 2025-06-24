@@ -4,6 +4,7 @@
 	import { isAuthenticated } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
 	import Navbar from '$lib/components/Navbar.svelte';
+	import { formatNumber, formatMemoryMB, formatPercentage, formatDuration } from '$lib/utils';
 	import type { Metrics } from '$lib/types';
 	
 	let metrics = $state<Metrics | null>(null);
@@ -34,12 +35,6 @@
 			console.error('Failed to load metrics:', error);
 			loading = false;
 		}
-	}
-	
-	function formatNumber(num: number): string {
-		if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
-		if (num >= 1000) return (num / 1000).toFixed(2) + 'K';
-		return num.toString();
 	}
 </script>
 
@@ -172,7 +167,7 @@
 											<td class="font-mono text-xs">{id}</td>
 											<td>{formatNumber(svc?.requests || 0)}</td>
 											<td class:text-error={svc?.errors > 0}>{svc?.errors || 0}</td>
-											<td>{svc?.avg_latency_ms || 0}ms</td>
+											<td>{formatDuration(svc?.avg_latency_ms || 0)}</td>
 											<td>
 												<span 
 													class="badge badge-xs"

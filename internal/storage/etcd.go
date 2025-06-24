@@ -457,7 +457,7 @@ func (s *etcdStorage) handleWatchEvent(event *clientv3.Event) {
 	}
 
 	// Parse object if not deleted
-	var object interface{}
+	var object any
 	if eventType != "deleted" {
 		switch kind {
 		case "service":

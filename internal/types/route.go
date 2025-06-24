@@ -7,16 +7,16 @@ import (
 
 // Route represents a routing rule
 type Route struct {
-	ID           string                 `json:"id" yaml:"id"`
-	Priority     int                    `json:"priority" yaml:"priority"`
-	Host         string                 `json:"host,omitempty" yaml:"host,omitempty"`
-	PathPrefix   string                 `json:"path_prefix,omitempty" yaml:"path_prefix,omitempty"`
-	PathRegex    string                 `json:"path_regex,omitempty" yaml:"path_regex,omitempty"`
-	Headers      map[string]string      `json:"headers,omitempty" yaml:"headers,omitempty"`
-	ServiceID    string                 `json:"service_id" yaml:"service_id"`
-	Middlewares  []string               `json:"middlewares" yaml:"middlewares"`
-	RewriteRules []RewriteRule          `json:"rewrite_rules,omitempty" yaml:"rewrite_rules,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	ID           string            `json:"id" yaml:"id"`
+	Priority     int               `json:"priority" yaml:"priority"`
+	Host         string            `json:"host,omitempty" yaml:"host,omitempty"`
+	PathPrefix   string            `json:"path_prefix,omitempty" yaml:"path_prefix,omitempty"`
+	PathRegex    string            `json:"path_regex,omitempty" yaml:"path_regex,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	ServiceID    string            `json:"service_id" yaml:"service_id"`
+	Middlewares  []string          `json:"middlewares" yaml:"middlewares"`
+	RewriteRules []RewriteRule     `json:"rewrite_rules,omitempty" yaml:"rewrite_rules,omitempty"`
+	Metadata     map[string]any    `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // RewriteRule defines URL rewriting rules
@@ -31,23 +31,23 @@ func (r *Route) MatchesHost(host string) bool {
 	if r.Host == "" {
 		return true // No host constraint means match all hosts
 	}
-	
+
 	// Remove port from host if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	
+
 	// Exact match or wildcard match
 	if r.Host == host {
 		return true
 	}
-	
+
 	// Support wildcard domains like *.example.com
 	if strings.HasPrefix(r.Host, "*.") {
 		suffix := r.Host[1:] // Remove the * to get .example.com
 		return strings.HasSuffix(host, suffix)
 	}
-	
+
 	return false
 }
 
@@ -57,14 +57,14 @@ func (r *Route) MatchesPath(path string) bool {
 	if r.PathPrefix == "" && r.PathRegex == "" {
 		return true
 	}
-	
+
 	// Check prefix match
 	if r.PathPrefix != "" {
 		if !strings.HasPrefix(path, r.PathPrefix) {
 			return false
 		}
 	}
-	
+
 	// Regex matching is done by the router with compiled regex
 	return true
 }
@@ -74,14 +74,14 @@ func (r *Route) MatchesHeaders(headers http.Header) bool {
 	if len(r.Headers) == 0 {
 		return true
 	}
-	
+
 	for key, value := range r.Headers {
 		headerValue := headers.Get(key)
 		if headerValue != value {
 			return false
 		}
 	}
-	
+
 	return true
 }
 

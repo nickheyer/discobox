@@ -60,7 +60,7 @@ type oauth2Provider struct {
 type oauth2Session struct {
 	state       string
 	accessToken string
-	userInfo    map[string]interface{}
+	userInfo    map[string]any
 	expiresAt   time.Time
 }
 
@@ -212,7 +212,7 @@ func (o *oauth2Provider) exchangeCode(code string) (string, error) {
 }
 
 // getUserInfo fetches user information
-func (o *oauth2Provider) getUserInfo(token string) (map[string]interface{}, error) {
+func (o *oauth2Provider) getUserInfo(token string) (map[string]any, error) {
 	req, err := http.NewRequest("GET", o.userInfoURL, nil)
 	if err != nil {
 		return nil, err
@@ -226,7 +226,7 @@ func (o *oauth2Provider) getUserInfo(token string) (map[string]interface{}, erro
 	}
 	defer resp.Body.Close()
 
-	var userInfo map[string]interface{}
+	var userInfo map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func NewTokenValidator(introspectURL, clientID, clientSecret string) *TokenValid
 }
 
 // Validate validates an OAuth2 token
-func (tv *TokenValidator) Validate(token string) (map[string]interface{}, error) {
+func (tv *TokenValidator) Validate(token string) (map[string]any, error) {
 	// Build introspection request
 	data := fmt.Sprintf("token=%s&token_type_hint=access_token", token)
 
@@ -297,7 +297,7 @@ func (tv *TokenValidator) Validate(token string) (map[string]interface{}, error)
 	defer resp.Body.Close()
 
 	// Parse response
-	var introspectResp map[string]interface{}
+	var introspectResp map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&introspectResp); err != nil {
 		return nil, err
 	}

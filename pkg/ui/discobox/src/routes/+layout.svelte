@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/stores/auth';
 	import { theme } from '$lib/stores/theme';
+	import Toast from '$lib/components/Toast.svelte';
 	
 	let { children } = $props();
 	
@@ -22,4 +23,5 @@
 
 <div class="min-h-screen bg-base-100">
 	{@render children()}
+	<Toast />
 </div>

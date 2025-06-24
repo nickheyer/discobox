@@ -218,6 +218,43 @@ func initializeApp(cfg *types.ProxyConfig, logger types.Logger, loader *config.L
 	if cfg.API.Enabled {
 		apiHandler := api.New(store, logger, cfg)
 
+		// Set config loader so API can reload config
+		apiHandler.SetConfigLoader(loader)
+
+		// Set reload callback to update running proxy
+		apiHandler.SetReloadCallback(func(newConfig *types.ProxyConfig) error {
+			// Rebuild middleware chain with new config
+			newProxyHandler := buildMiddlewareChain(newConfig, reverseProxy, logger)
+			proxyServer.Handler = newProxyHandler
+
+			// Update load balancer if algorithm changed
+			if newConfig.LoadBalancing.Algorithm != cfg.LoadBalancing.Algorithm {
+				newLB, err := initLoadBalancer(newConfig, logger)
+				if err != nil {
+					return fmt.Errorf("failed to update load balancer: %w", err)
+				}
+				reverseProxy.UpdateLoadBalancer(newLB)
+			}
+
+			// Update circuit breaker if settings changed
+			if newConfig.CircuitBreaker.Enabled {
+				newBreaker := circuit.NewCircuitBreaker(
+					newConfig.CircuitBreaker.FailureThreshold,
+					newConfig.CircuitBreaker.SuccessThreshold,
+					newConfig.CircuitBreaker.Timeout,
+				)
+				reverseProxy.UpdateCircuitBreaker(newBreaker)
+			} else {
+				reverseProxy.UpdateCircuitBreaker(nil)
+			}
+
+			// Update the config pointer AFTER successful updates
+			*cfg = *newConfig
+
+			logger.Info("Configuration updated via API")
+			return nil
+		})
+
 		// Create router for API server
 		apiRouter := apiHandler.Router()
 
@@ -360,27 +397,27 @@ type zapLoggerWrapper struct {
 	zap *zap.Logger
 }
 
-func (z *zapLoggerWrapper) Debug(msg string, fields ...interface{}) {
+func (z *zapLoggerWrapper) Debug(msg string, fields ...any) {
 	z.zap.Debug(msg, z.fieldsToZap(fields)...)
 }
 
-func (z *zapLoggerWrapper) Info(msg string, fields ...interface{}) {
+func (z *zapLoggerWrapper) Info(msg string, fields ...any) {
 	z.zap.Info(msg, z.fieldsToZap(fields)...)
 }
 
-func (z *zapLoggerWrapper) Warn(msg string, fields ...interface{}) {
+func (z *zapLoggerWrapper) Warn(msg string, fields ...any) {
 	z.zap.Warn(msg, z.fieldsToZap(fields)...)
 }
 
-func (z *zapLoggerWrapper) Error(msg string, fields ...interface{}) {
+func (z *zapLoggerWrapper) Error(msg string, fields ...any) {
 	z.zap.Error(msg, z.fieldsToZap(fields)...)
 }
 
-func (z *zapLoggerWrapper) With(fields ...interface{}) types.Logger {
+func (z *zapLoggerWrapper) With(fields ...any) types.Logger {
 	return &zapLoggerWrapper{zap: z.zap.With(z.fieldsToZap(fields)...)}
 }
 
-func (z *zapLoggerWrapper) fieldsToZap(fields []interface{}) []zap.Field {
+func (z *zapLoggerWrapper) fieldsToZap(fields []any) []zap.Field {
 	var zapFields []zap.Field
 	for i := 0; i < len(fields); i += 2 {
 		if i+1 < len(fields) {
@@ -507,7 +544,7 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if path == "/" {
 		path = "/index.html"
 	}
-	
+
 	file, err := h.fs.Open(path)
 	if err != nil {
 		// If file doesn't exist, serve index.html for client-side routing
@@ -520,14 +557,14 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/"
 	}
 	defer file.Close()
-	
+
 	// Get file info
 	stat, err := file.Stat()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Serve the file
 	if stat.IsDir() {
 		// If it's a directory, try index.html
@@ -537,13 +574,13 @@ func (h *spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer indexFile.Close()
-		
+
 		indexStat, err := indexFile.Stat()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		
+
 		if seeker, ok := indexFile.(io.ReadSeeker); ok {
 			http.ServeContent(w, r, path+"/index.html", indexStat.ModTime(), seeker)
 		} else {
